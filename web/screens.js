@@ -1,0 +1,1631 @@
+/* Knox Link — the tab screens. Each one builds its pieces once and updates them from the game's
+   messages; the shell (app.js) routes the messages and owns the sheet, toasts and alerts. */
+'use strict';
+
+// =================================================================== shared: items and weapons
+
+function itemGroup(it) {
+  const c = String(it.c || '').toLowerCase();
+  if (it.food || it.fluid || /food|drink|cook/.test(c)) return 'food';
+  if (/firstaid|medic|health/.test(c)) return 'medical';
+  if (/weapon|ammo|firearm|explosive/.test(c) && !/part/.test(c)) return 'weapon';
+  if (/tool|electronic|light|camping|fishing|garden|carpentry|mechanic|farming|trap/.test(c)) return 'tool';
+  if (/cloth|accessor|bag|container|protect|wear/.test(c)) return 'clothing';
+  return 'other';
+}
+
+function fallbackIcon(it) {
+  switch (itemGroup(it)) {
+    case 'food': return it.fluid && !it.food ? 'drink' : 'food';
+    case 'medical': return 'medical';
+    case 'weapon': return 'weapon';
+    case 'tool': return 'tool';
+    case 'clothing': return 'shirt';
+    default: return 'box';
+  }
+}
+
+function itemTags(it) {
+  const out = [];
+  if (it.eq) out.push(['In hand', 'acc']);
+  if (it.worn) out.push([it.loc || 'Worn', '']);   // where it's worn, in the game's words
+  const f = it.food;
+  if (f) {
+    if (f.rotten) out.push(['Rotten', 'bad']); else if (f.stale) out.push(['Stale', 'warn']);
+    if (f.burnt) out.push(['Burnt', 'bad']); else if (f.cooked) out.push(['Cooked', 'good']);
+    if (f.frozen) out.push(['Frozen', '']);
+    if (f.hunger) out.push([`Hunger ${f.hunger > 0 ? '+' : ''}${f.hunger}`, '']);
+    if (f.thirst) out.push([`Thirst ${f.thirst > 0 ? '+' : ''}${f.thirst}`, '']);
+  }
+  const fl = it.fluid;
+  if (fl) out.push([`${fl.n ? fl.n + ' ' : ''}${num(fl.amt)}/${num(fl.cap)} L`, fl.amt <= 0 ? 'warn' : '']);
+  if (it.use != null) out.push([`${pct(it.use)}% left`, it.use < 0.2 ? 'warn' : '']);
+  if (it.cond != null) out.push([`Condition ${pct(it.cond)}%`, it.cond < 0.25 ? 'bad' : it.cond < 0.5 ? 'warn' : '']);
+  if (it.ammo != null) out.push([`${it.ammo}/${it.ammoMax}`, it.ammo === 0 ? 'warn' : '']);
+  return out;
+}
+
+/** One item as a list row; picked: ticked while several are being picked (the tick stands in for its icon). */
+function itemRow(it, attrs = '', picked = false) {
+  const t = itemTags(it);
+  return `<button class="item" ${attrs}>${picked ? `<span class="ii pick">${icon('check')}</span>` : itemIcon(it.ic, fallbackIcon(it))}
+    <span class="it-main"><span class="it-name">${esc(it.n)}${it.cnt > 1 ? `<span class="cnt">×${it.cnt}</span>` : ''}</span>${t.length ? `<span class="it-tags">${tags(t)}</span>` : ''}</span>
+    <span class="it-w">${num(it.w)}</span></button>`;
+}
+
+/** Every item id of a row: a stack lists them all, so all of it moves. */
+function idsOf(it) {
+  const ids = arr(it && it.ids);
+  return ids.length ? ids : [it.id];
+}
+
+/** "Move to" buttons for a sheet (targets: Map of key -> label); one tap moves the item, or every one of a stack. */
+function moveToHtml(targets) {
+  if (!targets.size) return '';
+  return `<p class="sh-label">Move to</p><div class="move-to">${[...targets].map(([to, label]) =>
+    `<button class="mv" data-act="move" data-to="${esc(to)}">${esc(label)}</button>`).join('')}</div>`;
+}
+
+// =================================================================== the game's own menus
+
+/**
+ * The game's own right-click menu for an item or a thing in the world, as a sheet: its options in
+ * its words, greyed out with its reason when they can't be done now; a submenu opens in place.
+ * The chosen option runs through the game's own code (the "menuDo" command).
+ */
+const GameMenu = {
+  wait: null,     // the menu this screen asked for: {req, title, target}
+  stack: [],      // the menu levels shown: [{title, opts, path, steps}], a submenu on top
+  target: null,
+
+  /** target: what the menu is for, as the game add-on wants it ({kind: "item", ids} or {kind: "obj", x, y, z, i, n}). */
+  open(title, target) {
+    // the "menu" channel goes to every screen: a random number tells this screen's answer apart
+    const req = 1 + Math.floor(Math.random() * 2e9);
+    this.wait = { req, title, target };
+    openSheet(sheetHead(esc(title)) + '<p class="none" id="menuWait">Asking the game…</p>', null, 'menu', { req });
+    command('menu', { ...target, req }, null, true, (ok, msg) => {
+      if (ok || !this.showing(req)) return;
+      this.wait = null;
+      const w = $('#menuWait');
+      if (w) w.textContent = msg || "The game can't show that menu right now.";
+    });
+  },
+
+  /** The sheet still waits for this answer (it wasn't closed or replaced meanwhile). */
+  showing(req) {
+    return !!this.wait && this.wait.req === req && sheetKind === 'menu' && !!sheetArgs && sheetArgs.req === req;
+  },
+
+  /** The "menu" message: the game's menu for what a screen asked about. */
+  onMenu(d) {
+    const w = this.wait;
+    if (!w || Number(d.req) !== w.req) return;
+    const open = this.showing(w.req);
+    this.wait = null;
+    if (!open) return;
+    this.target = w.target;
+    this.stack = [{ title: d.title || w.title, opts: arr(d.opts), path: [] }];
+    this.show();
+  },
+
+  show() {
+    const lvl = this.stack[this.stack.length - 1];
+    // the n-th option of the same name is told apart as "name#n", the way the game add-on finds it again
+    const seen = {};
+    lvl.steps = [];
+    let rows = '';
+    lvl.opts.forEach((e, i) => {
+      if (!e || typeof e !== 'object') return;
+      const text = String(e.t == null ? '' : e.t);
+      const n = (seen[text] || 0) + 1;
+      seen[text] = n;
+      lvl.steps[i] = n > 1 ? `${text}#${n}` : text;
+      const off = e.d != null && e.d !== false;
+      const why = typeof e.d === 'string' ? e.d : '';
+      rows += `<button class="row-act gm-opt${off ? ' off' : ''}" data-act="opt" data-i="${i}">${e.ic ? itemIcon(e.ic, 'box', 'sm') : ''}
+        <span class="ra-main"><span class="ra-name">${esc(text)}</span>${why ? `<span class="ra-why">${esc(why)}</span>` : ''}</span>
+        ${e.s != null ? icon('chevron', 'gm-more') : ''}</button>`;
+    });
+    const head = this.stack.length > 1
+      ? `<button class="gm-back" data-act="back">${icon('chevron')}<span>${esc(lvl.title)}</span></button>`
+      : `<h3 class="gm-title">${esc(lvl.title)}</h3>`;
+    openSheet(head + (rows ? `<div class="acts">${rows}</div>` : '<p class="none">Nothing to do with it right now.</p>'), (name, b) => {
+      if (name === 'back') { this.stack.pop(); this.show(); return; }
+      const i = Number(b.dataset.i);
+      const e = lvl.opts[i];
+      if (!e) return;
+      const here = [...lvl.path, lvl.steps[i]];
+      if (e.s != null) {
+        this.stack.push({ title: String(e.t), opts: arr(e.s), path: here });
+        this.show();
+      } else if (e.d != null && e.d !== false) {
+        toast(typeof e.d === 'string' && e.d ? e.d : "That can't be done now", true);
+      } else {
+        command('menuDo', { ...this.target, path: here }, String(e.t));
+        closeSheet();
+      }
+    }, 'menu', { req: 0 });
+  },
+};
+
+/** Swap weapons like the game's hotbar: everything you carry, in-hand and belt/back first. */
+function weaponSheet(outfit) {
+  const list = arr(outfit && outfit.weapons);
+  const current = list.find((w) => w.eq === 'p');
+  let rows = '';
+  for (const w of list) {
+    if (w.eq === 'p') continue;
+    const t = [];
+    if (w.slot) t.push([w.slot, 'acc']); else if (w.bag) t.push(['In ' + w.bag, '']);
+    if (w.eq === 's') t.push(['Off hand', 'acc']);
+    if (w.two) t.push(['Two-handed', '']);
+    if (w.ranged) t.push([`${w.ammo || 0}/${w.ammoMax || 0}`, !w.ammo ? 'warn' : '']);
+    if (w.broken) t.push(['Broken', 'bad']);
+    else if (w.cond != null) t.push([pct(w.cond) + '%', w.cond < 0.25 ? 'bad' : w.cond < 0.5 ? 'warn' : 'good']);
+    rows += `<button class="row-act" data-act="swap" data-id="${w.id}">${itemIcon(w.ic, 'weapon', 'big')}
+      <span class="ra-main"><span class="ra-name${w.broken ? ' dim' : ''}">${esc(w.n)}</span><span class="it-tags">${tags(t)}</span></span></button>`;
+  }
+  const html = sheetHead('Weapons', current ? 'In your hands: ' + esc(current.n) : 'Your hands are free.')
+    + `<div class="act-pair">${act('weapon', 'Best one', 'best')}${current ? act('hand', 'Put it away', 'away', `data-id="${current.id}"`) : ''}</div>`
+    + (rows ? `<div class="acts">${rows}</div>` : `<p class="none">${current ? 'No other weapons on you.' : 'You carry no weapons.'}</p>`);
+  openSheet(html, {
+    best: () => { command('quick', { a: 'weapon' }, 'Equipping'); closeSheet(); },
+    away: (b) => { command('unequip', { id: Number(b.dataset.id) }, 'Putting away'); closeSheet(); },
+    swap: (b) => { command('swap', { id: Number(b.dataset.id) }, 'Equipping'); closeSheet(); },
+  });
+}
+
+// =================================================================== Vitals
+
+const Vitals = {
+  METERS: [
+    ['hp', 'Health', true], ['endu', 'Endurance', true], ['hunger', 'Hunger', false], ['thirst', 'Thirst', false],
+    ['fatigue', 'Tired', false], ['stress', 'Stress', false], ['panic', 'Panic', false], ['pain', 'Pain', false],
+    ['boredom', 'Bored', false], ['unhappy', 'Unhappy', false], ['sick', 'Sick', false], ['wet', 'Wet', false]],
+  /** action, label, icon, toast while it runs */
+  QUICK: [['bandage', 'Bandage', 'bandage', 'Bandaging'], ['eat', 'Eat', 'food', 'Eating'], ['drink', 'Drink', 'drink', 'Drinking'],
+    ['pills', 'Painkiller', 'pill', 'Taking a painkiller'], ['light', 'Light', 'light', 'Light'], ['weapon', 'Weapon', 'weapon', 'Equipping'],
+    ['sit', 'Rest', 'rest', 'Rest']],
+
+  init() {
+    this.fig = Figure($('#figure'), (k) => this.tapBody(k));
+    this.avatar = $('#avatar');
+    this.angle = 90;
+    this.avatarOff = false;
+    this.bedNear = false;
+    this.selected = null;
+    this.treatPart = -1;     // the body part whose treatments the open sheet shows (its index), or -1
+    this.treatSig = '';
+    this.treatList = [];
+    this.moodleSig = '';
+    $('#quick').innerHTML = this.QUICK.map(([a, label, ic]) =>
+      `<button class="qt" data-q="${a}">${icon(ic)}<span>${label}</span></button>`).join('')
+      // Project Viewpoint's camera, only while that mod runs
+      + `<button class="qt" data-q="view" hidden>${icon('eye')}<span>3D view</span></button>`;
+    this.viewNext = '';
+    $('#quick').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-q]');
+      if (!b) return;
+      if (b.dataset.q === 'view') { command('view', {}, null); return; }
+      const q = this.QUICK.find((x) => x[0] === b.dataset.q);
+      // weapons get a picker: the game's hotbar swap, or the best one in one more tap
+      if (q[0] === 'weapon' && S.outfit) weaponSheet(S.outfit);
+      else if (q[0] === 'sit' && this.bedNear) this.confirmSleep();
+      else command('quick', { a: q[0] }, q[3]);
+    });
+    $('#meters').innerHTML = this.METERS.map(([k, label], i) =>
+      `<div class="meter${i < 2 ? ' big' : ''}" data-k="${k}"><div class="row"><b>${label}</b><span>–</span></div><div class="bar"><i></i></div></div>`).join('');
+    $('#flipBtn').addEventListener('click', () => this.flip());
+    $('#lookInfo').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-worn]');
+      const w = c && arr(S.outfit && S.outfit.worn).find((x) => String(x.id) === c.dataset.worn);
+      if (w) this.openWorn(w);
+    });
+    this.attachAvatar();
+    this.setLook(load('kl.bodyLook') === '1', true);
+  },
+
+  // ------------------------------------------------------------ quick actions
+
+  /** Near a bed, "Rest" becomes "Sleep". */
+  setBedNear(near) {
+    if (near === this.bedNear) return;
+    this.bedNear = near;
+    const b = $('#quick [data-q="sit"]');
+    b.innerHTML = `${icon(near ? 'moon' : 'rest')}<span>${near ? 'Sleep' : 'Rest'}</span>`;
+  },
+
+  /** The 3D view tile names the view a tap switches to, like the game's Back wheel. */
+  setView(view) {
+    const b = $('#quick [data-q="view"]');
+    b.hidden = !view;
+    const next = view ? view.n : '';
+    if (!view || next === this.viewNext) return;
+    this.viewNext = next;
+    b.querySelector('span').textContent = next === 'first' ? '1st person' : next === 'third' ? '3rd person' : 'Top-down';
+  },
+
+  confirmSleep() {
+    openSheet(sheetHead('Go to bed?', 'Your character walks to the nearest bed and sleeps until rested, unless something wakes them. Not while zombies are around.')
+      + `<div class="acts">${act('moon', 'Sleep', 'sleep')}${act('rest', 'Just rest here', 'rest')}</div>`, {
+      sleep: () => { command('quick', { a: 'sleep' }, 'Sleep'); closeSheet(); },
+      rest: () => { command('quick', { a: 'sit' }, 'Rest'); closeSheet(); },
+    });
+  },
+
+  // ------------------------------------------------------------ look mode
+
+  /** Flips the figure between injuries and how the character looks, like turning a card. */
+  flip() {
+    if (this.flipping) return;
+    this.flipping = true;
+    const card = $('#bodyCard');
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      this.setLook(!this.fig.isLook());
+      this.flipping = false;
+      return;
+    }
+    card.style.transition = 'transform .13s ease-in';
+    card.style.transform = 'perspective(1600px) rotateY(90deg)';
+    setTimeout(() => {
+      this.setLook(!this.fig.isLook());
+      card.style.transition = 'none';
+      card.style.transform = 'perspective(1600px) rotateY(-90deg)';
+      void card.offsetWidth;
+      card.style.transition = 'transform .13s ease-out';
+      card.style.transform = '';
+      setTimeout(() => { card.style.transition = ''; this.flipping = false; }, 150);
+    }, 130);
+  },
+
+  setLook(on, first) {
+    this.fig.setLook(on);
+    if (!on) this.showAvatar(false);
+    store('kl.bodyLook', on ? '1' : null);
+    $('#bodyTitle').textContent = on ? 'Outfit' : 'Body';
+    $('#flipBtn').innerHTML = icon(on ? 'vitals' : 'shirt');
+    $('#flipBtn').setAttribute('aria-label', on ? 'Show injuries' : 'Show outfit');
+    $('#bodyLegend').hidden = on;
+    $('#lookInfo').hidden = !on;
+    $('#bodyHint').textContent = on ? "Drag to turn · tap a part to see what's on it" : 'Tap the body to see your character';
+    if (on) this.refreshLookInfo();
+    else $('#bodyHp').textContent = S.body && S.body.hp != null ? `${S.body.hp}% health` : '';
+    if (!first) { resubscribe(); if (on) avatarPoll(); }
+  },
+
+  /** True while the live picture should be fetched (look mode on this tab). */
+  wantsAvatar() { return this.fig.isLook() && !this.avatarOff; },
+
+  showAvatar(on) {
+    this.avatar.hidden = !on;
+    $('#figure').style.visibility = on ? 'hidden' : '';
+  },
+
+  /** A new frame of the character (an object URL). */
+  avatarFrame(url) {
+    if (!this.fig.isLook()) { URL.revokeObjectURL(url); return; }
+    const old = this.avatarUrl;
+    this.avatarUrl = url;
+    this.avatar.onload = () => { if (old) URL.revokeObjectURL(old); this.showAvatar(true); };
+    this.avatar.src = url;
+  },
+
+  /** This game can't draw the character for us: the painted silhouette stands in. */
+  avatarUnavailable() {
+    this.avatarOff = true;
+    this.showAvatar(false);
+    resubscribe();   // and the game can stop trying to draw it
+  },
+
+  /** Drag sideways to turn the character; tap a part of them to see what they wear there. */
+  attachAvatar() {
+    const av = this.avatar;
+    let down = null, dragging = false, lastSent = 0;
+    av.addEventListener('pointerdown', (e) => {
+      down = { x: e.clientX, y: e.clientY };
+      dragging = false;
+      av.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    av.addEventListener('pointermove', (e) => {
+      if (!down) return;
+      const dx = e.clientX - down.x;
+      if (!dragging && Math.abs(dx) > 8) dragging = true;
+      if (!dragging) return;
+      this.angle = ((this.angle - dx * 0.8) % 360 + 360) % 360;
+      down.x = e.clientX;
+      const now = Date.now();
+      if (now - lastSent > 90) { lastSent = now; command('avatarTurn', { deg: Math.round(this.angle) }, null, true); }
+    });
+    const up = (e) => {
+      if (!down) return;
+      if (dragging) command('avatarTurn', { deg: Math.round(this.angle) }, null, true);
+      else if (e.type === 'pointerup') {
+        const part = this.avatarPart(e.clientX, e.clientY);
+        if (part) this.openOutfitPart(part); else this.flip();
+      }
+      down = null;
+    };
+    av.addEventListener('pointerup', up);
+    av.addEventListener('pointercancel', up);
+    av.addEventListener('dragstart', (e) => e.preventDefault());
+  },
+
+  /** Which body part a tap on the picture is on (the model stands centred, head at the top). */
+  avatarPart(cx, cy) {
+    const r = this.avatar.getBoundingClientRect();
+    // the picture keeps its 1:2 shape inside the box
+    const s = Math.min(r.width / 240, r.height / 480);
+    const iw = 240 * s, ih = 480 * s;
+    const fx = (cx - r.left - (r.width - iw) / 2) / iw, fy = (cy - r.top - (r.height - ih) / 2) / ih;
+    if (fx < 0.1 || fx > 0.9 || fy < 0.03 || fy > 0.99) return null;
+    const facing = this.angle > 0 && this.angle < 180;
+    // facing you, their right hand is on your left
+    const side = ((fx < 0.5) === facing) ? '_R' : '_L';
+    const off = Math.abs(fx - 0.5);
+    if (fy < 0.16) return off < 0.12 ? 'Head' : null;
+    if (fy < 0.21) return off < 0.1 ? 'Neck' : null;
+    if (fy < 0.62 && off > 0.17) {
+      if (fy > 0.48) return 'Hand' + side;
+      return fy > 0.36 ? 'ForeArm' + side : 'UpperArm' + side;
+    }
+    if (fy < 0.36) return 'Torso_Upper';
+    if (fy < 0.47) return 'Torso_Lower';
+    if (fy < 0.53) return 'Groin';
+    if (fy < 0.71) return 'UpperLeg' + side;
+    if (fy < 0.9) return 'LowerLeg' + side;
+    return 'Foot' + side;
+  },
+
+  tapBody(key) {
+    if (key == null) { this.flip(); return; }
+    if (this.fig.isLook()) { this.openOutfitPart(key); return; }
+    if (this.treatable(key)) this.openPart(key);
+    else this.flip();
+  },
+
+  partData(key) { return S.body ? arr(S.body.parts).find((p) => p.k === key) : null; },
+
+  partName(key) {
+    const p = this.partData(key);
+    if (p && p.n) return p.n;
+    return key.replace('_L', ' (left)').replace('_R', ' (right)').replace('_', ' ');
+  },
+
+  /** Something to see or do on this part in the health view. */
+  treatable(key) {
+    const p = this.partData(key);
+    if (!p) return false;
+    return !!(p.bleed || p.scratch || p.cut || p.deep || p.bite || p.burn || p.fracture || p.glass || p.bullet || p.band || p.infected
+      || (p.hp != null && p.hp < 100));
+  },
+
+  /** What the character wears and carries (the "outfit" message). */
+  outfit(d) {
+    this.recolor();
+  },
+
+  recolor() {
+    const o = S.outfit;
+    if (!o) return;
+    const colors = {};
+    let headCovered = false;
+    for (const e of arr(o.worn)) {   // inner layers first: the outer one wins
+      const parts = arr(e.parts);
+      if (!parts.length) continue;
+      const c = this.itemColor(e);
+      for (const p of parts) { colors[p] = c; if (p === 'Head') headCovered = true; }
+    }
+    this.fig.setLookColors(colors, hexColor(o.skin, '#d5a27c'), hexColor(o.hair, '#4a3424'), headCovered);
+    if (this.fig.isLook()) this.refreshLookInfo();
+  },
+
+  /** The colour the game tints it in, or the main colour of its icon. */
+  itemColor(e) {
+    if (e.c) return hexColor(e.c, '#8a8f98');
+    if (!e.ic) return '#8a8f98';
+    this.iconColors = this.iconColors || {};
+    if (e.ic in this.iconColors) return this.iconColors[e.ic] || '#8a8f98';
+    this.iconColors[e.ic] = null;
+    KnoxArt.iconColor(e.ic).then((c) => { this.iconColors[e.ic] = c; if (c) this.recolor(); });
+    return '#8a8f98';
+  },
+
+  refreshLookInfo() {
+    const o = S.outfit;
+    const el = $('#lookInfo');
+    if (!o) { el.innerHTML = '<p class="muted small">Looking at your clothes…</p>'; return; }
+    let bite = 0, scratch = 0, n = 0;
+    for (const p of Object.values(o.prot || {})) { if (!p) continue; bite += p.b || 0; scratch += p.s || 0; n++; }
+    $('#bodyHp').textContent = '';
+    let html = '';
+    if (n) html += `<div class="tagrow">${tag('Bite protection ' + Math.round(bite / n) + '%', bite / n >= 30 ? 'good' : '')}${tag('Scratch protection ' + Math.round(scratch / n) + '%', scratch / n >= 50 ? 'good' : '')}</div>`;
+    // a bag, a belt, a watch: worn, but not on a body part
+    const extra = arr(o.worn).filter((e) => !arr(e.parts).length);
+    if (extra.length) html += `<div class="tagrow">${extra.map((e) => `<button class="tag chip" data-worn="${e.id}">${esc(e.n)}</button>`).join('')}</div>`;
+    if (el.innerHTML !== html) el.innerHTML = html;
+  },
+
+  openOutfitPart(key) {
+    this.selected = key;
+    this.fig.setSelected(key);
+    const o = S.outfit;
+    const pp = o && o.prot && o.prot[key];
+    let html = sheetHead(esc(this.partName(key)), pp ? `Protection: bite ${pp.b || 0}% · scratch ${pp.s || 0}%` : '');
+    const worn = arr(o && o.worn).slice().reverse().filter((e) => arr(e.parts).includes(key));   // outermost first
+    html += worn.length ? `<div class="acts">${worn.map((e) => this.wornRow(e)).join('')}</div>` : '<p class="none">Nothing on it.</p>';
+    if (key.startsWith('Hand')) {
+      const hands = S.core && S.core.hands;
+      let held = hands ? hands[key.endsWith('_R') ? 'p' : 's'] : null;
+      if (hands && key.endsWith('_L') && hands.both) held = hands.p;
+      html += `<p class="sh-label">In this hand</p><p class="sh-big">${held ? esc(held.n) : 'Nothing'}</p>`;
+      if (o) html += `<div class="acts">${act('weapon', 'Switch weapon…', 'weapons')}</div>`;
+    }
+    openSheet(html, {
+      worn: (b) => { const e = arr(S.outfit && S.outfit.worn).find((x) => String(x.id) === b.dataset.id); if (e) this.openWorn(e); },
+      weapons: () => weaponSheet(S.outfit),
+    });
+  },
+
+  wornTags(e) {
+    const out = [];
+    if (e.cond != null) out.push([`Condition ${pct(e.cond)}%`, e.cond < 0.25 ? 'bad' : e.cond < 0.5 ? 'warn' : '']);
+    if (e.holes > 0) out.push([e.holes + (e.holes === 1 ? ' hole' : ' holes'), 'warn']);
+    if (e.bite > 0) out.push([`Bite protection ${e.bite}%`, '']);
+    if (e.scratch > 0) out.push([`Scratch protection ${e.scratch}%`, '']);
+    if (e.wet != null) out.push(['Wet', 'warn']);
+    if (e.blood) out.push(['Bloody', 'bad']);
+    return out;
+  },
+
+  wornRow(e) {
+    const t = this.wornTags(e);
+    return `<button class="row-act" data-act="worn" data-id="${e.id}">${itemIcon(e.ic, 'shirt', 'big')}
+      <span class="ra-main"><span class="ra-name">${esc(e.n)}</span>${t.length ? `<span class="it-tags">${tags(t)}</span>` : ''}</span></button>`;
+  },
+
+  openWorn(e) {
+    const t = this.wornTags(e);
+    openSheet(`<div class="sh-item">${itemIcon(e.ic, 'shirt', 'huge')}<h3>${esc(e.n)}</h3></div>`
+      + (t.length ? `<div class="sh-facts">${tags(t)}</div>` : '')
+      + `<div class="acts">${act('shirt', 'Take it off', 'off')}</div>`, {
+      off: () => { command('takeoff', { id: e.id }, 'Taking off'); closeSheet(); },
+    });
+  },
+
+  core(c) {
+    const p = c.p || {};
+    this.setBedNear(!!p.bed);
+    this.setView(c.view || null);
+    this.fig.setSex(!!p.female);
+    const b = c.bars;
+    // Immersion sends no numbers for needs: then the moodles say it, like in the game
+    const numbers = !!(b && b.hunger != null);
+    $('#condCard').hidden = !numbers;
+    if (numbers) {
+      for (const [k, , high] of this.METERS) {
+        const el = $(`.meter[data-k="${k}"]`);
+        const v = Math.max(0, Math.min(1, b[k] || 0));
+        const col = meterColor(v, high);
+        const span = $('span', el);
+        span.textContent = pct(v) + '%';
+        span.style.color = col === 'var(--text-3)' || col === 'var(--good)' ? '' : col;
+        const i = $('i', el);
+        i.style.width = pct(v) + '%';
+        i.style.background = col;
+      }
+      $('#tempLabel').textContent = b.temp > 0 ? 'Body ' + Fmt.bodyTemp(b.temp) : '';
+    }
+    const list = arr(c.m);
+    const sig = list.map((m) => m.id + m.l).join(',') + (document.documentElement.classList.contains('art-moodle') ? '+' : '-');
+    if (sig === this.moodleSig) return;
+    this.moodleSig = sig;
+    $('#moodleCount').textContent = list.length ? String(list.length) : '';
+    $('#moodles').innerHTML = list.length ? list.map((m) => {
+      const color = moodleColor(m.g, m.l);
+      const pips = [1, 2, 3, 4].map((i) => `<i style="background:${i <= m.l ? color : ''}"></i>`).join('');
+      return `<div class="moodle">${moodleTile(moodleIcon(m.id, m.l), color)}
+        <div class="m-main"><div class="m-name">${esc(m.n)}</div>${m.d ? `<div class="m-desc">${esc(m.d)}</div>` : ''}</div>
+        <div class="pips">${pips}</div></div>`;
+    }).join('') : '<p class="none">Feeling fine.</p>';
+  },
+
+  body(d) {
+    this.fig.update(arr(d.parts));
+    if (!this.fig.isLook()) $('#bodyHp').textContent = d.hp != null ? `${d.hp}% health` : '';
+    // the open body part: the facts stay steady while the sheet is open; the treatments follow what you have
+    if (this.treatPart >= 0 && this.selected) {
+      const p = this.partData(this.selected);
+      if (p) this.showTreatments(p);
+    }
+  },
+
+  /** A hurt body part: what's wrong with it in the game's words, and every treatment its health panel offers there. */
+  openPart(key) {
+    const p = this.partData(key);
+    if (!p) return;
+    this.selected = key;
+    this.fig.setSelected(key);
+    this.treatPart = p.i;
+    this.treatSig = '';
+    this.treatList = [];
+    openSheet(sheetHead(esc(p.n), `${p.hp}% healthy${p.pain ? ` · pain ${p.pain}` : ''}`)
+      + `<div class="sh-facts">${this.woundFacts(p)}</div><div id="treatBox"></div>`, {
+      treat: (b) => {
+        const e = this.treatList[Number(b.dataset.k)];
+        if (!e) return;
+        command('treat', { part: this.treatPart, a: e.a, i: e.i || '' }, e.a);
+        closeSheet();
+      },
+    }, 'part', key);
+    this.showTreatments(p);
+    // the game looks at this part's treatments while the sheet is open
+    command('healthPart', { part: p.i }, null);
+  },
+
+  /** What's wrong with a body part, in the game's own words and colours (its health panel's lines). */
+  woundFacts(p) {
+    const lines = arr(p.lines);
+    if (lines.length) return lines.map((l) => tag(l.t, ['bad', 'warn', 'good'].includes(l.k) ? l.k : '')).join('');
+    const w = this.wounds(p);   // an older game add-on: the plain facts
+    return w.length ? tags(w) : tag('No wounds', 'good');
+  },
+
+  /** The treatments the game's health panel offers on the open part, in treating order (body.sel). */
+  showTreatments(p) {
+    const box = $('#treatBox');
+    if (!box || sheetKind !== 'part') return;
+    const sel = S.body && S.body.sel;
+    const known = !!sel && Number(sel.i) === this.treatPart;
+    const list = known ? arr(sel.t) : [];
+    const sig = known ? JSON.stringify(list) : '?';
+    if (sig === this.treatSig) return;
+    this.treatSig = sig;
+    this.treatList = list;
+    if (!known) { box.innerHTML = '<p class="none">Looking at what you have…</p>'; return; }
+    if (!list.length) {
+      box.innerHTML = `<p class="none">${this.treatable(p.k) ? 'You have nothing to treat this with.' : 'Nothing to treat here.'}</p>`;
+      return;
+    }
+    box.innerHTML = '<p class="sh-label">Treat</p><div class="acts">' + list.map((e, k) => `<button class="row-act" data-act="treat" data-k="${k}">
+      ${itemIcon(e.ic, 'bandage')}<span class="ra-main"><span class="ra-name">${esc(e.a)}</span>${e.i ? `<span class="ra-sub">${esc(e.i)}</span>` : ''}</span></button>`).join('') + '</div>';
+  },
+
+  sheetClosed() {
+    if (this.treatPart >= 0) command('healthPart', { part: -1 }, null, true);
+    this.treatPart = -1;
+    this.treatList = [];
+    this.selected = null;
+    this.fig.setSelected(null);
+  },
+
+  wounds(p) {
+    const w = [];
+    if (p.bleed) w.push(['Bleeding', 'bad']);
+    if (p.bite) w.push(['Bite', 'bad']);
+    if (p.deep) w.push(['Deep wound', 'bad']);
+    if (p.glass) w.push(['Glass shard', 'bad']);
+    if (p.bullet) w.push(['Bullet', 'bad']);
+    if (p.infected) w.push(['Infected', 'bad']);
+    if (p.fracture) w.push([p.splint ? 'Fracture (splinted)' : 'Fracture', 'warn']);
+    if (p.burn) w.push(['Burn', 'warn']);
+    if (p.cut) w.push(['Laceration', 'warn']);
+    if (p.scratch) w.push(['Scratch', 'warn']);
+    if (p.stitch) w.push(['Stitched', 'good']);
+    if (p.band) w.push([p.dirty ? 'Dirty bandage' : 'Bandaged', p.dirty ? 'warn' : 'good']);
+    return w;
+  },
+};
+
+// =================================================================== Gear
+
+const Gear = {
+  init() {
+    this.filter = 'all';
+    this.seg = load('kl.gearSeg') || 'on';
+    this.weaponsSig = '';
+    this.items = new Map();
+    this.inContainer = new Map();   // item id -> the container of yours it's in (0 = your inventory, else the bag's id)
+    this.selecting = false;         // picking several items to move at once
+    this.picked = new Set();
+    $('#gearSeg').addEventListener('click', (e) => { const b = e.target.closest('[data-seg]'); if (b) this.setSegment(b.dataset.seg); });
+    $('#gearFilter').addEventListener('click', (e) => {
+      if (e.target.closest('[data-select]')) { this.setSelecting(!this.selecting); return; }
+      const b = e.target.closest('[data-f]');
+      if (!b) return;
+      this.filter = b.dataset.f;
+      $$('#gearFilter [data-f]').forEach((x) => x.classList.toggle('on', x === b));
+      if (S.gear) this.gear(S.gear);
+    });
+    $('#containers').addEventListener('click', (e) => {
+      const r = e.target.closest('[data-item]');
+      if (!r) return;
+      const id = Number(r.dataset.item);
+      if (!this.selecting) { this.openItem(id); return; }
+      // picking several: a tap ticks it, the icon shows the tick
+      if (!this.picked.delete(id)) this.picked.add(id);
+      if (S.gear) this.gear(S.gear);
+    });
+    $('#pickMove').addEventListener('click', () => this.movePicked());
+    $('#hands').addEventListener('click', (e) => {
+      const h = e.target.closest('[data-hand]');
+      if (h && this.items.has(Number(h.dataset.hand))) this.openItem(Number(h.dataset.hand));
+    });
+    $('#hotbar').addEventListener('click', (e) => {
+      const t = e.target.closest('[data-slot],[data-all]');
+      if (!t) return;
+      if (t.dataset.all) { weaponSheet(S.outfit); return; }
+      command('hotbar', { i: Number(t.dataset.slot) }, t.dataset.held ? 'Putting away' : 'Drawing');
+    });
+    this.initAround();
+    $('#craftSearch').addEventListener('input', () => this.renderCraft());
+    $('#craftList').addEventListener('click', (e) => {
+      const r = e.target.closest('[data-recipe]');
+      if (r) command('craft', { id: r.dataset.recipe }, 'Making');
+    });
+    this.setSegment(this.seg, true);
+  },
+
+  /** Around you: a tap takes (or opens a stack's sheet), pressing and holding (or a right-click) opens the item's sheet. */
+  initAround() {
+    const el = $('#gearAround');
+    let timer = 0, sx = 0, sy = 0;
+    const stop = () => { clearTimeout(timer); timer = 0; };
+    el.addEventListener('pointerdown', (e) => {
+      this.held = false;
+      stop();
+      const row = e.target.closest('[data-take]');
+      if (!row || e.button > 0) return;
+      sx = e.clientX;
+      sy = e.clientY;
+      timer = setTimeout(() => { timer = 0; this.held = true; this.holdAround(row); }, 500);
+    });
+    el.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) stop(); });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, stop);
+    el.addEventListener('contextmenu', (e) => {
+      const row = e.target.closest('[data-take]');
+      if (!row) return;
+      e.preventDefault();
+      stop();
+      if (!this.held) { this.held = true; this.holdAround(row); }
+    });
+    el.addEventListener('click', (e) => {
+      // the tap that ends a press-and-hold doesn't also take the item
+      if (this.held) { this.held = false; return; }
+      this.tapAround(e);
+    });
+  },
+
+  setSegment(s, first) {
+    if (s !== 'on' && this.selecting) this.setSelecting(false);
+    this.seg = s;
+    store('kl.gearSeg', s);
+    $('#gearOn').hidden = s !== 'on';
+    $('#gearAround').hidden = s !== 'around';
+    $('#gearCraft').hidden = s !== 'craft';
+    $$('#gearSeg button').forEach((b) => b.classList.toggle('on', b.dataset.seg === s));
+    $('#view-gear').scrollTop = 0;
+    if (!first) resubscribe();
+  },
+
+  core(c) {
+    const h = c.hands || {};
+    const sig = JSON.stringify(h);
+    if (sig !== this.handsSig) {
+      this.handsSig = sig;
+      $('#hands').innerHTML = this.hand('Main hand', h.p, h.both) + this.hand('Off hand', h.both ? null : h.s, false);
+    }
+    const b = c.bars || {};
+    if (b.weightMax > 0) {
+      const r = b.weight / b.weightMax;
+      $('#weightText').textContent = `${num(b.weight)} / ${num(b.weightMax)}`;
+      const i = $('#weightBar');
+      i.style.width = Math.min(100, r * 100) + '%';
+      i.style.background = r > 1 ? 'var(--bad)' : r > 0.8 ? 'var(--warn)' : 'var(--good)';
+    }
+  },
+
+  hand(label, it, both) {
+    if (!it) {
+      return `<div class="card hand empty"><span class="ii">${icon('hand')}</span><span class="h-main"><span class="h-label">${label}</span><span class="h-name">Empty</span></span></div>`;
+    }
+    const sub = [];
+    if (both) sub.push('Both hands');
+    if (it.cond != null) sub.push(`Condition ${pct(it.cond)}%`);
+    if (it.ammo != null) sub.push(`Ammo ${it.ammo}/${it.ammoMax}${it.chambered ? ' +1' : ''}`);
+    if (it.use != null) sub.push(`${pct(it.use)}% left`);
+    return `<button class="card hand" data-hand="${it.id}">${itemIcon(it.ic, 'hand')}<span class="h-main"><span class="h-label">${label}</span>
+      <span class="h-name">${esc(it.n)}</span>${sub.length ? `<span class="h-sub">${esc(sub.join(' · '))}</span>` : ''}</span></button>`;
+  },
+
+  /** The hotbar strip (and the way to every other weapon), from the "outfit" message. */
+  outfit(d) {
+    const slots = arr(d.hotbar), weapons = arr(d.weapons);
+    const sig = JSON.stringify(slots) + weapons.length;
+    if (sig === this.weaponsSig) return;
+    this.weaponsSig = sig;
+    $('#hotbarCard').hidden = !slots.length && !weapons.length;
+    let html = '';
+    for (const s of slots) {
+      const has = s.id != null, held = !!s.eq;
+      const cd = s.cond;
+      const barHtml = has && cd != null ? bar(cd, cd < 0.25 ? 'var(--bad)' : cd < 0.5 ? 'var(--warn)' : 'var(--good)', 'thin') : '<div class="bar thin hidden"></div>';
+      html += `<button class="slot${held ? ' held' : ''}${has ? '' : ' free'}" ${has ? `data-slot="${s.i}"` : 'disabled'} ${held ? 'data-held="1"' : ''}
+        title="${esc(s.item || s.n || '')}">${itemIcon(has ? s.ic : '', 'weapon', 'big')}<span class="slot-name">${esc(s.n || '')}</span>${barHtml}</button>`;
+    }
+    // every weapon you carry, bags included: the game's hotbar swap
+    if (weapons.length) html += `<button class="slot more" data-all="1">${icon('weapon')}<span class="slot-name">All weapons</span></button>`;
+    $('#hotbar').innerHTML = html;
+  },
+
+  gear(d) {
+    this.items.clear();
+    this.inContainer.clear();
+    const conts = arr(d.containers);
+    for (const c of conts) for (const it of arr(c.items)) { this.items.set(it.id, it); this.inContainer.set(it.id, c.id); }
+    // picked things that went somewhere else aren't picked any more
+    for (const id of this.picked) if (!this.items.has(id)) this.picked.delete(id);
+    this.updatePickBar();
+    // the game resends the same list now and then: repainting it would swallow a tap in progress
+    const sig = JSON.stringify(d) + this.filter + (this.selecting ? '|' + [...this.picked].join(',') : '');
+    if (sig === this.gearSig) return;
+    this.gearSig = sig;
+    let html = '';
+    for (const c of conts) {
+      const hands = [], worn = [], rows = [];
+      for (const it of arr(c.items)) {
+        if (this.filter !== 'all' && itemGroup(it) !== this.filter) continue;
+        // your inventory splits into what's in your hands, what you wear and what you carry
+        if (c.id === 0 && it.eq) hands.push(it);
+        else if (c.id === 0 && it.worn) worn.push(it);
+        else rows.push(it);
+      }
+      const weight = `${num(c.w)}${c.cap > 0 ? ' / ' + num(c.cap) : ''}`;
+      if (c.id === 0) {
+        if (hands.length) html += this.section('In your hands', 'hand', null, hands);
+        if (worn.length) html += this.section('Wearing', 'shirt', null, worn);
+        if (rows.length || this.filter === 'all') html += this.section('Carrying', 'gear', weight, rows);
+      } else if (rows.length || this.filter === 'all') {
+        html += this.section(c.n, 'bag', weight, rows);
+      }
+    }
+    $('#containers').innerHTML = html || '<p class="none">Nothing here.</p>';
+  },
+
+  /** One section of what you have on you: a heading and its items in a card. */
+  section(title, ic, right, rows) {
+    return `<div class="cont"><div class="cont-head">${icon(ic)}<b>${esc(title)}</b>${right != null ? `<span>${right}</span>` : ''}</div>
+      <div class="items">${rows.map((it) => itemRow(it, `data-item="${it.id}"`, this.selecting && this.picked.has(it.id))).join('') || '<p class="none pad">Empty</p>'}</div></div>`;
+  },
+
+  // ------------------------------------------------------------ moving things
+
+  /**
+   * Where an item could go, for "Move to": your inventory, each bag you carry, the containers
+   * around you and the floor. Map of key -> label; skips the place it is in (and a bag into itself).
+   */
+  moveTargets(itemId, from, fromNear) {
+    const out = new Map();
+    if (from == null || from !== 0) out.set('inv', 'Inventory');
+    for (const c of arr(S.gear && S.gear.containers)) {
+      if (c.id === 0 || c.id === itemId || (from != null && from === c.id)) continue;
+      out.set('bag:' + c.id, c.n);
+    }
+    if (S.loot && fromNear == null) {
+      const named = {};   // three "Drawer"s become Drawer, Drawer 2, Drawer 3
+      for (const c of arr(S.loot.list)) {
+        if (c.corpse) continue;
+        if (c.floor) { out.set('floor', 'Floor'); continue; }
+        const k = (named[c.n] || 0) + 1;
+        named[c.n] = k;
+        out.set('near:' + c.k, k > 1 ? `${c.n} ${k}` : c.n);
+      }
+    }
+    return out;
+  },
+
+  /** The "Select" switch: tap items to pick them, then move them all at once. */
+  setSelecting(on) {
+    this.selecting = on;
+    this.picked.clear();
+    const b = $('#gearFilter [data-select]');
+    b.textContent = on ? 'Done' : 'Select';
+    b.classList.toggle('on', on);
+    if (S.gear) this.gear(S.gear);
+    this.updatePickBar();
+  },
+
+  updatePickBar() {
+    const n = this.picked.size;
+    $('#pickBar').hidden = !(this.selecting && n);
+    $('#pickCount').textContent = n === 1 ? '1 item' : `${n} items`;
+  },
+
+  movePicked() {
+    const ids = [];
+    for (const id of this.picked) {
+      const it = this.items.get(id);
+      if (!it || it.worn) continue;   // worn things come off first
+      ids.push(...idsOf(it));
+    }
+    if (!ids.length) { toast('Take worn things off first', true); return; }
+    const n = this.picked.size;
+    openSheet(sheetHead('Move ' + (n === 1 ? '1 item' : `${n} items`)) + moveToHtml(this.moveTargets(-1, null, null)), {
+      move: (b) => { command('move', { ids, to: b.dataset.to }, 'Moving'); closeSheet(); },
+    });
+    this.setSelecting(false);
+  },
+
+  openItem(id) {
+    const it = this.items.get(id);
+    if (!it) return;
+    const t = itemTags(it);
+    let acts = '', n = 0;
+    const defs = {
+      equip1: ['hand', 'Equip in main hand', 'Equipping'], equip2: ['hand', 'Equip in off hand', 'Equipping'],
+      unequip: ['x', 'Put away', 'Putting away'], read: ['book', 'Read', 'Reading'], pill: ['pill', 'Take one', 'Taking'],
+      wear: ['shirt', 'Wear', 'Putting on'], takeoff: ['shirt', 'Take off', 'Taking off'],
+    };
+    for (const a of arr(it.a)) {
+      if (a === 'eat' || a === 'drink') {
+        acts += `<p class="sh-label">${a === 'eat' ? 'Eat' : 'Drink'}</p><div class="act-row">`
+          + [['1', 'All'], ['0.5', 'Half'], ['0.25', 'Quarter']].map(([p, l]) => act(null, l, a, `data-portion="${p}"`)).join('') + '</div>';
+        n++;
+      } else if (defs[a]) {
+        acts += act(defs[a][0], defs[a][1], a);
+        n++;
+      }
+    }
+    const ids = idsOf(it);
+    openSheet(`<div class="sh-item">${itemIcon(it.ic, fallbackIcon(it), 'huge')}<div><h3>${esc(it.n)}${it.cnt > 1 ? ` <span class="muted">×${it.cnt}</span>` : ''}</h3>
+        <p class="sh-sub">${esc(it.c || '')} · weight ${num(it.w)}</p></div></div>`
+      + (t.length ? `<div class="sh-facts">${tags(t)}</div>` : '')
+      + (n ? `<div class="acts">${acts}</div>` : '')
+      // anywhere else you can put it: your bags, the containers around you, the floor (not while worn)
+      + (it.worn ? '' : moveToHtml(this.moveTargets(id, this.inContainer.get(id), null)))
+      // every action the game's own right-click menu has for it
+      + `<div class="acts${n ? ' after' : ''}">${act('more', 'All actions…', 'menu')}</div>`, (name, b) => {
+      if (name === 'move') {
+        command('move', { ids, to: b.dataset.to }, 'Moving');
+      } else if (name === 'menu') {
+        GameMenu.open(it.n, { kind: 'item', ids });
+        return;
+      } else if (name === 'eat' || name === 'drink') {
+        command(name, { id, portion: Number(b.dataset.portion) }, name === 'eat' ? 'Eating' : 'Drinking');
+      } else if (defs[name]) {
+        const args = { id };
+        if (name === 'equip1') args.hand = 'primary';
+        if (name === 'equip2') args.hand = 'secondary';
+        command(name.startsWith('equip') ? 'equip' : name, args, defs[name][2]);
+      } else return;
+      closeSheet();
+    });
+  },
+
+  // ------------------------------------------------------------ around you
+
+  /**
+   * What's around you (the "loot" message): the containers the game's loot window lists, the
+   * bodies a few steps away, and the things around you with a menu of their own.
+   */
+  loot(d) {
+    const list = arr(d.list), objs = arr(d.objs);
+    const withItems = list.filter((c) => !c.floor && arr(c.items).length).length;
+    $('#gearSeg [data-seg="around"]').textContent = withItems ? 'Around you · ' + withItems : 'Around you';
+    const sig = JSON.stringify(list) + JSON.stringify(objs) + settings.units;
+    if (sig === this.lootSig) return;
+    this.lootSig = sig;
+    // the one the game has open first, then the ones with something in them, bodies nearest first; empty ones last
+    const rank = (c) => (c.sel ? 0 : c.corpse ? 2 : arr(c.items).length ? (c.floor ? 3 : 1) : 4);
+    const order = list.slice().sort((a, b) => rank(a) - rank(b));
+    let html = order.map((c) => {
+      const items = arr(c.items);
+      // the loot window's own button picture: a loose file under media/ui, or one from the packs
+      const ic = String(c.ic || '');
+      const name = ic.replace(/^.*[/\\]/, '').replace(/\.png$/i, '');
+      const fb = c.floor ? 'layers' : 'box';
+      const pic = itemIcon(ic ? (/\.png$/i.test(ic) && ic.startsWith('ui/') ? 'media:' + ic + '|' : '') + name : '', fb, 'flat');
+      let sub = num(c.w) + (c.cap > 0 ? ' / ' + num(c.cap) : '');
+      if (c.corpse) {
+        const away = Number(c.d) || 0;
+        sub = `${away < 1.2 ? 'Next to you' : Fmt.near(away) + ' away'} · ${num(c.w)}`;
+      }
+      return `<div class="card cont-card"><div class="cc-head">${pic}<span class="cc-main"><b>${esc(c.n)}</b>
+          <span>${items.length ? sub : 'Empty'}</span></span>
+          ${items.length ? `<button class="mini-btn" data-takeall="${c.k}">Take all</button>` : ''}</div>
+        ${items.length ? `<div class="items flush">${items.map((it) => itemRow(it, `data-take="${it.id}" data-k="${c.k}"`)).join('')}</div>` : ''}</div>`;
+    }).join('');
+    // the things around you that have a menu of their own; one tap opens the game's menu for that spot
+    if (objs.length) {
+      html += `<div class="card cont-card"><div class="cc-head"><span class="ii flat">${icon('hand')}</span><span class="cc-main"><b>Things around you</b></span></div>
+        <div class="items flush">${objs.map((o, i) => `<button class="item thing" data-obj="${i}"><span class="it-main"><span class="it-name">${esc(o.n)}</span></span>
+          <span class="it-w">${Fmt.near(Number(o.d) || 0)}</span></button>`).join('')}</div></div>`;
+    }
+    $('#gearAround').innerHTML = html || emptyState('box', 'Nothing around you', "Walk up to shelves, cupboards, cars or bodies. Whatever the game's loot window shows appears here, ready to take.");
+  },
+
+  /** The item a row of Around you stands for, and its container. */
+  aroundItem(row) {
+    const cont = arr(S.loot && S.loot.list).find((c) => String(c.k) === row.dataset.k);
+    const it = cont && arr(cont.items).find((x) => String(x.id) === row.dataset.take);
+    return it ? { it, cont } : null;
+  },
+
+  tapAround(e) {
+    const all = e.target.closest('[data-takeall]');
+    if (all) { command('takeAll', { k: Number(all.dataset.takeall) }, 'Taking'); return; }
+    const obj = e.target.closest('[data-obj]');
+    if (obj) {
+      const o = arr(S.loot && S.loot.objs)[Number(obj.dataset.obj)];
+      if (o) GameMenu.open(o.n, { kind: 'obj', x: o.x, y: o.y, z: o.z, i: o.i, n: o.n });
+      return;
+    }
+    const row = e.target.closest('[data-take]');
+    const found = row && this.aroundItem(row);
+    if (!found) return;
+    // one tap takes one; a stack asks how many
+    if (!(found.it.cnt > 1)) command('take', { id: found.it.id }, 'Taking');
+    else this.aroundSheet(found.it, found.cont);
+  },
+
+  holdAround(row) {
+    const found = this.aroundItem(row);
+    if (found) this.aroundSheet(found.it, found.cont);
+  },
+
+  /** Everything for an item around you: take it, take the whole stack, straight into a bag, or the game's own menu. */
+  aroundSheet(it, cont) {
+    const cnt = it.cnt || 1;
+    const ids = idsOf(it);
+    // straight into a bag instead of your pockets
+    const targets = this.moveTargets(it.id, null, cont.k);
+    targets.delete('inv');
+    openSheet(`<div class="sh-item">${itemIcon(it.ic, fallbackIcon(it), 'huge')}<div><h3>${esc(it.n)}${cnt > 1 ? ` <span class="muted">×${cnt}</span>` : ''}</h3>
+        <p class="sh-sub">In ${esc(cont.n)}</p></div></div>`
+      + `<div class="acts">${act('hand', cnt > 1 ? 'Take one' : 'Take', 'one')}${cnt > 1 ? act('bag', 'Take all ' + cnt, 'all') : ''}</div>`
+      + moveToHtml(targets)
+      + `<div class="acts after">${act('more', 'All actions…', 'menu')}</div>`, {
+      one: () => { command('take', { id: it.id }, 'Taking'); closeSheet(); },
+      all: () => { command('take', { ids }, 'Taking'); closeSheet(); },
+      move: (b) => { command('move', { ids, to: b.dataset.to }, 'Moving'); closeSheet(); },
+      menu: () => GameMenu.open(it.n, { kind: 'item', ids }),
+    });
+  },
+
+  // ------------------------------------------------------------ craft
+
+  craft(d) {
+    const sig = JSON.stringify(d);
+    if (sig === this.craftSig) return;
+    this.craftSig = sig;
+    this.renderCraft();
+  },
+
+  /** "CookingPrep" -> "Cooking prep" */
+  prettify(s) {
+    const out = String(s).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ');
+    return out.charAt(0).toUpperCase() + out.slice(1).toLowerCase();
+  },
+
+  renderCraft() {
+    const d = S.craft;
+    const el = $('#craftList');
+    if (!d) return;
+    if (d.off) { el.innerHTML = "<p class=\"none\">This version of the game doesn't have the new crafting.</p>"; return; }
+    const q = $('#craftSearch').value.trim().toLowerCase();
+    const groups = [];
+    for (const r of arr(d.list)) {
+      if (q && !String(r.n || '').toLowerCase().includes(q)) continue;
+      const cat = r.cat || '';
+      if (!groups.length || groups[groups.length - 1].cat !== cat) groups.push({ cat, list: [] });
+      groups[groups.length - 1].list.push(r);
+    }
+    el.innerHTML = groups.length ? groups.map((g) => `<div class="card craft-card"><h2>${esc(g.cat ? this.prettify(g.cat) : 'Other')}</h2>
+      ${g.list.map((r) => {
+        // recipe icons are named without the "Item_" the packs use: try that first, then the name itself
+        let ic = String(r.ic || '');
+        if (ic && !ic.startsWith('Item_')) ic = 'Item_' + ic + '|' + ic;
+        return `<button class="item" data-recipe="${esc(r.id)}">${itemIcon(ic, 'tool')}<span class="it-main"><span class="it-name">${esc(r.n)}</span></span><span class="mini-btn">Make</span></button>`;
+      }).join('')}</div>`).join('')
+      : emptyState('tool', q ? 'No match' : 'Nothing to make right now', 'Carry the tools and materials a recipe needs, or stand next to a table for the ones made on a surface.');
+  },
+};
+
+// =================================================================== Skills
+
+const Skills = {
+  skills(d) {
+    const sig = JSON.stringify(d);
+    if (sig === this.sig) return;   // skills change slowly: skip identical repaints
+    this.sig = sig;
+    $('#skills').innerHTML = arr(d.groups).map((g) => `<div class="card">${cardHead(esc(g.g))}${arr(g.s).map((s) => {
+      const lvl = s.lvl || 0, p = s.p || 0;
+      const zero = lvl === 0 && !p;
+      let sq = '';
+      // the game's own skill squares: filled up to the level, partly filled for progress
+      for (let i = 0; i < 10; i++) {
+        if (i < lvl) sq += '<i class="on"></i>';
+        else if (i === lvl && lvl < 10 && p > 0) sq += `<i class="part" style="--p:${(p * 100).toFixed(1)}%"></i>`;
+        else sq += '<i></i>';
+      }
+      return `<div class="skill${zero ? ' zero' : ''}"><div class="s-row"><span class="s-name">${esc(s.n)}</span>
+        ${s.mult ? tag('×' + num(s.mult), 'acc') : ''}${s.boost ? tag('+' + s.boost) : ''}<b class="s-lvl">${lvl}</b></div>
+        <div class="squares" aria-label="Level ${lvl}">${sq}</div></div>`;
+    }).join('')}</div>`).join('') || '<p class="none">No skills yet.</p>';
+  },
+};
+
+// =================================================================== Car
+
+const Car = {
+  init() {
+    this.dash = Dashboard($('#dashCanvas'), () => { $('#speedoCard').hidden = true; });
+    this.mech = CarOverlay($('#mech'));
+    $('#carControls').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-control]');
+      if (!b || b.disabled) return;
+      const c = b.dataset.control;
+      command('car', { a: c }, c === 'horn' ? null : cap1(c));
+    });
+  },
+
+  core(c) {
+    const v = c.veh;
+    if (!v) return;
+    this.dash.set(v);
+    $('#speedoCard').hidden = this.dash.ready();
+    // plain speedometer, shown only until the dashboard artwork has arrived
+    const max = Math.max(60, v.max || 160);
+    const frac = Math.max(0, Math.min(1, (v.spd || 0) / max));
+    const R = 120, C = 2 * Math.PI * R;
+    $('#speedoArc').setAttribute('stroke-dasharray', `${C * 0.75 * frac} ${C}`);
+    $('#speedoNum').textContent = Fmt.speed(v.spd || 0);
+    $('#speedoUnit').textContent = Fmt.speedUnit();
+    const gear = String(v.gear || '');
+    $('#gearbox').innerHTML = ['R', 'N', '1', '2', '3', '4', '5'].map((g) => `<i class="${g === gear ? 'on' : ''}">${g}</i>`).join('');
+    $('#vehName').textContent = String(v.name || 'Vehicle');
+    $('#vehRole').textContent = v.drv ? 'Driving' : 'Passenger';
+    const gauge = (id, value, text, color) => {
+      $(`#${id} span`).textContent = text;
+      const i = $(`#${id} .bar i`);
+      i.style.width = (Math.max(0, Math.min(1, value)) * 100).toFixed(1) + '%';
+      i.style.background = color;
+    };
+    const f = v.fuel || 0;
+    gauge('gFuel', f, pct(f) + '%', f < 0.15 ? 'var(--bad)' : f < 0.3 ? 'var(--warn)' : 'var(--good)');
+    const e = v.eng == null ? -1 : v.eng;
+    gauge('gEngine', Math.max(0, e) / 100, e >= 0 ? Math.round(e) + '%' : '—', e < 30 ? 'var(--bad)' : e < 60 ? 'var(--warn)' : 'var(--good)');
+    $('#gBattery').hidden = v.batt == null;
+    if (v.batt != null) gauge('gBattery', v.batt, pct(v.batt) + '%', v.batt < 0.2 ? 'var(--bad)' : 'var(--good)');
+    // the controls double as the status: tap one to switch it, like the dashboard buttons
+    const drv = !!v.drv, run = !!v.run;
+    const chip = (control, ic, text, on, enabled, show = true) => show
+      ? `<button class="pill${on ? ' on' : ''}" data-control="${control}" ${enabled ? '' : 'disabled'}>${icon(ic)}${text}</button>` : '';
+    const html = chip('engine', 'engine', run ? 'Engine on' : (v.keys || v.hotwired ? 'Start engine' : 'Engine off'), run, drv)
+      + chip('lights', 'light', v.lights ? 'Lights on' : 'Lights off', !!v.lights, drv, !!v.hasLights)
+      + chip('heater', 'sun', v.heater ? 'Heater on' : 'Heater off', !!v.heater, true, !!v.hasHeater)
+      + chip('horn', 'horn', 'Horn', false, drv);
+    if (html !== this.controlsHtml) { this.controlsHtml = html; $('#carControls').innerHTML = html; }
+    $('#partsCard').hidden = !v.mech;
+    this.mech.set(v.mech || null);
+  },
+};
+
+// =================================================================== Forecast
+
+/**
+ * The weather forecast the character last heard on the Automated Emergency Broadcast: the same
+ * numbers the radio read out for today and tomorrow, nothing they didn't hear.
+ */
+const Forecast = {
+  /** [label, day] for the forecast days that are still ahead, from core.fc and core.di. */
+  days(core) {
+    const fc = core && core.fc;
+    if (!fc) return [];
+    const age = (core.di || 0) - (fc.di || 0);
+    const out = [];
+    arr(fc.days).forEach((d, k) => {
+      const rel = k - age;
+      if (rel >= 0 && rel <= 1 && d) out.push([rel === 0 ? 'Today' : 'Tomorrow', d]);
+    });
+    return out;
+  },
+  sky(d) {
+    const wx = d.wx != null;
+    if (d.storm) return 'storm';
+    if (d.blizzard || (wx && d.snow)) return 'snow';
+    if (wx || d.heavy) return 'rain';
+    if (d.fog) return 'fog';
+    if ((d.cloud || 0) > 0.4) return 'cloud';
+    return 'sun';
+  },
+  segment(h) {
+    if (h <= 4 || h >= 23) return 'night';
+    if (h < 8) return 'early morning';
+    if (h < 12) return 'morning';
+    if (h < 18) return 'afternoon';
+    return 'evening';
+  },
+  /** "Rain from the afternoon", "Overcast", "Clear skies"… worded like the broadcast. */
+  headline(d) {
+    let what;
+    if (d.storm) what = 'Storms';
+    else if (d.blizzard) what = 'Blizzard';
+    else if (d.heavy) what = 'Heavy rain';
+    else if (d.wx != null) what = d.snow ? 'Snow' : 'Rain';
+    else if (d.fog) return 'Fog';
+    else if ((d.cloud || 0) > 0.7) return 'Overcast';
+    else if ((d.cloud || 0) > 0.4) return 'Partly cloudy';
+    else return 'Clear skies';
+    if (d.wx === 'from') return what + ' from the ' + this.segment(d.at || 0);
+    if (d.wx === 'until') return (d.at || 0) >= 22 ? what + ' all day' : what + ' until the ' + this.segment(d.at || 0);
+    return what;
+  },
+  temps: (d) => (d.tmin == null ? '' : Fmt.temp(d.tmin) + ' to ' + Fmt.temp(d.tmax)),
+  wind(d) {
+    const w = d.wind || 0;
+    if (w > 0.75) return 'Gale-force winds';
+    if (w > 0.5) return 'Strong winds';
+    if (w > 0.25) return 'Windy';
+    return 'Light winds';
+  },
+  /** "Heard on the Emergency Broadcast today at 7:00 AM" (the time only if they could read it). */
+  heard(core) {
+    const fc = core.fc;
+    if (!fc) return '';
+    const age = (core.di || 0) - (fc.di || 0);
+    let when = age <= 0 ? 'today' : age === 1 ? 'yesterday' : age + ' days ago';
+    if (fc.t && fc.t.w) when += ' at ' + Fmt.clock(fc.t.h, fc.t.mi);
+    return 'Heard on the Emergency Broadcast ' + when;
+  },
+  dayRow(label, d) {
+    return `<div class="fc-day">${icon(this.sky(d))}<span class="fc-main"><span class="fc-label">${label}</span><b>${this.headline(d)}</b>
+      <span class="fc-wind">${this.wind(d)}</span></span><span class="fc-temp">${this.temps(d)}</span></div>`;
+  },
+  /** Tapping the weather in the top bar. */
+  sheet(core) {
+    const days = this.days(core);
+    let html;
+    if (!days.length) {
+      const old = core && core.fc;
+      html = sheetHead('Forecast', old ? 'The last forecast you heard is out of date.' : "You haven't heard a forecast yet.")
+        + `<div class="tip">${icon('radio')}<p>Tune a radio to the Automated Emergency Broadcast. It reads out the weather for today and tomorrow every hour.</p></div>`;
+    } else {
+      html = sheetHead('Forecast', esc(this.heard(core))) + `<div class="fc-days">${days.map(([l, d]) => this.dayRow(l, d)).join('')}</div>`;
+    }
+    openSheet(html);
+  },
+  /** A small card for the top of the radio log, when there's a forecast to show. */
+  card(core) {
+    const days = this.days(core);
+    if (!days.length) return '';
+    return `<div class="card">${cardHead('Forecast', 'Emergency Broadcast')}<div class="fc-days">${days.map(([l, d]) => this.dayRow(l, d)).join('')}</div></div>`;
+  },
+};
+
+// =================================================================== Radio & chat
+
+const Comms = {
+  PHRASES: ['On my way', 'Help!', 'Zombies here!', 'Wait for me', 'Follow me', 'Yes', 'No', 'Thanks'],
+  CHANNELS: [['say', 'Say'], ['shout', 'Shout'], ['general', 'General'], ['faction', 'Faction'], ['safehouse', 'Safehouse']],
+
+  init() {
+    this.mode = 'radio';
+    this.channel = 'say';
+    this.mp = false;
+    this.radioEmpty();
+    this.chatEmpty();
+    $('#phrases').innerHTML = this.PHRASES.map((p) => `<button data-phrase="${esc(p)}">${esc(p)}</button>`).join('');
+    $('#phrases').addEventListener('click', (e) => { const b = e.target.closest('[data-phrase]'); if (b) this.send(b.dataset.phrase); });
+    $('#commsSeg').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) this.setMode(b.dataset.mode); });
+    $('#chatForm').addEventListener('submit', (e) => { e.preventDefault(); this.send($('#chatInput').value); });
+    $('#channelBtn').addEventListener('click', () => this.pickChannel());
+    $('#radioList').addEventListener('click', (e) => { if (e.target.closest('[data-clear]')) command('radioClear', {}, 'Log cleared'); });
+  },
+
+  radioEmpty() {
+    $('#radioList').innerHTML = emptyState('radio', 'Nothing heard yet', 'Turn on a radio or a TV near your character. What they hear shows up here, and stays after a reload.');
+  },
+  chatEmpty() {
+    $('#chatList').innerHTML = emptyState('chat', 'No messages yet', 'Chat from other players shows up here. Tap a phrase or type to answer.');
+  },
+
+  modeNow() { return this.mp ? this.mode : 'radio'; },
+
+  setMode(m) {
+    this.mode = m;
+    const chat = this.mp && m === 'chat';
+    $('#radioPane').hidden = chat;
+    $('#chatPane').hidden = !chat;
+    $('#view-comms').classList.toggle('chatting', chat);
+    $$('#commsSeg button').forEach((b) => b.classList.toggle('on', (b.dataset.mode === 'chat') === chat));
+    if (chat) this.scrollChat();
+  },
+
+  /** Multiplayer adds the chat. */
+  setMp(on) {
+    if (this.mp === on) return;
+    this.mp = on;
+    $('#commsSeg').hidden = !on;
+    this.setMode(on ? 'chat' : 'radio');
+  },
+
+  setForecast(html) { $('#forecastHolder').innerHTML = html; },
+
+  radio(d) {
+    const sig = JSON.stringify(d.list);
+    if (sig === this.radioSig) return;
+    this.radioSig = sig;
+    const list = arr(d.list);
+    if (!list.length) { this.radioEmpty(); return; }
+    $('#radioList').innerHTML = list.map((e) => {
+      const kind = e.k || 'radio';
+      const ic = kind === 'tv' ? 'tv' : kind === 'walkie' ? 'walkie' : 'radio';
+      const lines = arr(e.l);
+      return `<div class="card bc"><div class="bc-head">${icon(ic)}<b>${esc(this.station(e))}</b>${e.t && e.t.w ? `<span>${Fmt.clock(e.t.h, e.t.mi)}</span>` : ''}</div>
+        ${lines.map((l, i) => `<p class="${i === lines.length - 1 ? 'last' : ''}">${esc(l)}</p>`).join('')}</div>`;
+    }).join('') + '<button class="link-btn" data-clear="1">Clear the log</button>';
+  },
+
+  station(e) {
+    const kind = e.k || 'radio';
+    const name = e.s || '';
+    const f = e.f || 0;
+    const freq = f > 1000 ? (f / 1000).toFixed(1) + ' MHz' : '';
+    switch (kind) {
+      case 'tv': return name || 'Television';
+      case 'media': return name || 'Recording';
+      case 'walkie': return 'Walkie-talkie' + (freq ? ' · ' + freq : '');
+      default:
+        if (!name) return freq || 'Radio';
+        return freq ? name + ' · ' + freq : name;
+    }
+  },
+
+  channelColor(k) {
+    switch (k) {
+      case 'shout': return 'var(--warn)';
+      case 'faction': return 'var(--good)';
+      case 'safehouse': return '#2a9d8f';
+      case 'whisper': return '#b083e8';
+      case 'radio': return '#5aa9e6';
+      case 'admin': case 'server': return 'var(--bad)';
+      case 'general': return 'var(--accent)';
+      default: return 'var(--text-2)';
+    }
+  },
+
+  chat(d) {
+    const can = d.can || {};
+    this.canFaction = !!can.faction;
+    this.canSafehouse = !!can.safehouse;
+    const sig = JSON.stringify(d.list);
+    if (sig === this.chatSig) return;
+    this.chatSig = sig;
+    const list = arr(d.list);
+    if (!list.length) { this.chatEmpty(); return; }
+    // oldest at the top, newest just above the box, like a chat
+    $('#chatList').innerHTML = list.slice().reverse().map((m) => {
+      const k = m.k || 'say';
+      const who = m.me ? 'You' : (m.a || '');
+      let label = (who ? who + ' · ' : '') + cap1(k);
+      if (m.t && m.t.w) label += ' · ' + Fmt.clock(m.t.h, m.t.mi);
+      return `<div class="msg${m.me ? ' me' : ''}"><span class="msg-label" style="color:${this.channelColor(k)}">${esc(label)}</span><p>${esc(m.s)}</p></div>`;
+    }).join('');
+    this.scrollChat();
+  },
+
+  scrollChat() {
+    const l = $('#chatList');
+    requestAnimationFrame(() => { l.scrollTop = l.scrollHeight; });
+  },
+
+  pickChannel() {
+    const rows = this.CHANNELS.filter(([k]) => !(k === 'faction' && !this.canFaction) && !(k === 'safehouse' && !this.canSafehouse))
+      .map(([k, label]) => `<button class="act" data-act="ch" data-ch="${k}" style="color:${k === 'say' ? 'var(--text)' : this.channelColor(k)}">${icon('chat')}<span>${label}${k === 'shout' ? '<span class="act-note">zombies hear it</span>' : ''}</span></button>`).join('');
+    openSheet(sheetHead('Send to') + `<div class="acts">${rows}</div>`, {
+      ch: (b) => {
+        this.channel = b.dataset.ch;
+        $('#channelBtn').textContent = this.CHANNELS.find((c) => c[0] === this.channel)[1];
+        closeSheet();
+      },
+    });
+  },
+
+  send(text) {
+    const s = String(text || '').trim();
+    if (!s) return;
+    command('chat', { s, ch: this.channel }, null);
+    $('#chatInput').value = '';
+  },
+};
+
+// =================================================================== Base
+
+const Base = {
+  init() {
+    this.clock = true;
+    $('#baseCol').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-base]');
+      if (!b) return;
+      const d = S.base || {};
+      const a = b.dataset.base;
+      if (a === 'set') command('baseSet', {}, 'Base set');
+      else if (a === 'go') command('waypoint', { x: Math.floor(d.x), y: Math.floor(d.y), label: 'Base' }, 'Waypoint set');
+      else if (a === 'move') this.confirmMove(d);
+      else if (a === 'remove') this.confirmRemove();
+    });
+  },
+
+  /** Player position and the world's rules, for the distance line and the "seen" wording. */
+  core(c) {
+    this.pos = c.p;
+    this.clock = !c.rules || c.rules.clock !== false;
+    this.updateDistance();
+  },
+
+  updateDistance() {
+    const el = $('#baseDist');
+    const d = S.base;
+    if (!el || !d || !this.pos || !d.set) return;
+    const dx = d.x - this.pos.x, dy = d.y - this.pos.y;
+    const dist = Math.hypot(dx, dy);
+    el.textContent = dist < 25 ? "You're here" : Fmt.dist(dist) + ' ' + Fmt.compass(dx, dy);
+  },
+
+  base(d) {
+    const sig = JSON.stringify(d) + this.clock;
+    if (sig === this.sig) { this.updateDistance(); return; }
+    this.sig = sig;
+    const col = $('#baseCol');
+    if (!d.set) {
+      col.innerHTML = `<div class="card base-empty">${icon('home')}<b>No base yet</b>
+        <p>Mark the place you live in. Knox Link keeps an eye on it: generators, rain collectors and crops, as you saw them the last time you were there.</p>
+        <button class="act" data-base="set">${icon('home')}<span>Make this spot my base</span></button>
+        <p class="muted small">Or press and hold anywhere on the map.</p></div>`;
+      return;
+    }
+    const name = d.n || (d.safehouse ? 'Safehouse' : 'Base');
+    const seen = d.seen;
+    let html = `<div class="card"><div class="base-head"><span class="base-ico">${icon('home')}</span><span class="bh-main"><b>${esc(name)}</b><span id="baseDist"></span></span></div>
+      <div class="base-btns"><button class="act" data-base="go">${icon('pin')}<span>Go there</span></button>
+      ${d.safehouse ? '' : `<button class="act" data-base="move">${icon('home')}<span>Move here</span></button><button class="act sq" data-base="remove" aria-label="Forget this base">${icon('trash')}</button>`}</div></div>
+      <p class="seen${seen && seen.live ? ' live' : ''}">${esc(this.seenText(d, seen))}</p>`;
+    if (seen) {
+      const on = !!seen.power;
+      html += `<div class="card row-card">${icon('bolt', on ? 'acc' : 'dim')}<b>Electricity</b>${tag(on ? 'On' : 'Off', on ? 'good' : '')}</div>`;
+      const gens = arr(seen.gens);
+      if (gens.length) {
+        html += `<div class="card">${cardHead(gens.length > 1 ? 'Generators' : 'Generator')}${gens.map((g) => {
+          const f = (g.fuel || 0) / 100;
+          return `<div class="gen"><div class="gen-row"><span class="grow">Fuel</span>${tag(g.on ? 'Running' : 'Off', g.on ? 'good' : '')}<b>${g.fuel || 0}%</b></div>
+            ${bar(f, f < 0.15 ? 'var(--bad)' : f < 0.35 ? 'var(--warn)' : 'var(--good)')}
+            <p class="${(g.cond || 0) < 30 ? 'bad' : 'muted'} small">Condition ${g.cond || 0}%</p></div>`;
+        }).join('')}</div>`;
+      }
+      const b = seen.barrels;
+      if (b) {
+        html += `<div class="card">${cardHead('Rain collectors', String(b.n || 0))}<div class="gen-row">${icon('water', 'water')}<span class="grow">Water</span><b>${pct(b.pct)}% full</b></div>
+          ${bar(b.pct || 0, '#5aa9e6')}</div>`;
+      }
+      const crops = arr(seen.crops);
+      if (crops.length) {
+        html += `<div class="card">${cardHead('Crops')}${crops.map((g) => {
+          const t = [];
+          if (g.ready > 0) t.push([g.ready + ' ready to harvest', 'good']);
+          if (g.dry > 0) t.push([g.dry + ' need water', 'warn']);
+          if (g.sick > 0) t.push([g.sick + ' sick', 'bad']);
+          if (g.dead > 0) t.push([g.dead + ' dead', 'bad']);
+          const words = (g.waterWord || '') + (g.healthWord ? ' · ' + g.healthWord : '');
+          if (words && !words.startsWith(' ·')) t.push([words, '']);
+          return `<div class="crop"><div class="gen-row">${icon('plant', 'good')}<b>${esc(g.n)} <span class="muted">×${g.cnt}</span></b></div><div class="tagrow ind">${tags(t)}</div></div>`;
+        }).join('')}</div>`;
+      }
+      if (!gens.length && !b && !crops.length) html += '<p class="none">No generators, rain collectors or crops around it yet.</p>';
+    }
+    col.innerHTML = html;
+    this.updateDistance();
+  },
+
+  /** "Live", or how long ago the character last saw it (rough without a watch). */
+  seenText(d, seen) {
+    if (!seen) return 'Go back there once and Knox Link will remember what you see.';
+    if (seen.live) return "You're here: this is live.";
+    const h = d.ago || 0;
+    if (!this.clock) {
+      if (h < 12) return 'Seen earlier today';
+      if (h < 36) return 'Seen about a day ago';
+      return 'Seen ' + Math.round(h / 24) + ' days ago';
+    }
+    if (h < 1) return 'Seen less than an hour ago';
+    if (h < 48) return 'Seen ' + Math.round(h) + ' hours ago';
+    return 'Seen ' + Math.round(h / 24) + ' days ago';
+  },
+
+  confirmMove(d) {
+    openSheet(sheetHead('Move your base here?', "Knox Link will look after the place you're standing in instead, and forget what it saw at the old one.")
+      + `<div class="acts">${act('home', 'Move it here', 'yes')}${act('x', 'Keep it where it is', 'no')}</div>`, {
+      yes: () => { command('baseSet', d.n ? { n: d.n } : {}, 'Base moved'); closeSheet(); },
+      no: () => closeSheet(),
+    });
+  },
+
+  confirmRemove() {
+    openSheet(sheetHead('Forget this base?', 'Only Knox Link forgets it. Nothing changes in your game.')
+      + `<div class="acts">${act('trash', 'Forget it', 'yes', '', 'danger')}${act('x', 'Keep it', 'no')}</div>`, {
+      yes: () => { command('baseClear', {}, 'Base forgotten'); closeSheet(); },
+      no: () => closeSheet(),
+    });
+  },
+};
+
+// =================================================================== Settings > Game
+
+/**
+ * The game's own settings that are handy from here: one-tap modes (Cool, Balanced, Smooth: the
+ * frame-rate cap and how far Project Viewpoint's 3D furniture reaches), the heat control, the
+ * frame rate, the survival guide; and how warm the device running the game is.
+ */
+const Game = {
+  init() {
+    this.sig = '';
+    this.holdUntil = {};   // a control just tapped keeps its new look until the game has caught up
+    $('#perfMode').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mode]');
+      if (!b) return;
+      this.hold('mode');
+      this.mark('#perfMode', b);
+      command('perfMode', { mode: b.dataset.mode }, b.textContent);
+    });
+    $('#fpsSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-cap]');
+      if (!b) return;
+      this.hold('cap');
+      this.mark('#fpsSeg', b);
+      command('fps', { cap: Number(b.dataset.cap) }, null);
+    });
+    $('#perfAuto').addEventListener('change', (e) => { this.hold('auto'); command('perfMode', { auto: e.target.checked }, null); });
+    $('#guideShow').addEventListener('change', (e) => { this.hold('guide'); command('guide', { show: e.target.checked }, null); });
+  },
+
+  hold(k) { this.holdUntil[k] = Date.now() + 1500; },
+  held(k) { return (this.holdUntil[k] || 0) > Date.now(); },
+  mark(seg, on) { $$(seg + ' button').forEach((x) => x.classList.toggle('on', x === on)); },
+
+  /** The game's frame-rate cap, mode and heat control, and the device's temperatures (core.perf). */
+  perf(core) {
+    const p = core && core.perf;
+    if (!p) return;
+    // (a hold running out shows the game's own value again)
+    const sig = JSON.stringify(p) + settings.units + ['mode', 'auto', 'cap', 'guide'].filter((k) => this.held(k)).join();
+    if (sig === this.sig) return;
+    this.sig = sig;
+    $('#gameCard').hidden = false;
+    const hasMode = p.mode != null;
+    $('#modeRow').hidden = !hasMode;
+    $('#autoRow').hidden = !hasMode;
+    if (!this.held('mode')) $$('#perfMode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === p.mode));
+    if (!this.held('auto')) $('#perfAuto').checked = !!p.auto;
+    const cap = p.unc ? 0 : Number(p.cap) || 0;
+    if (!this.held('cap')) $$('#fpsSeg button').forEach((b) => b.classList.toggle('on', Number(b.dataset.cap) === cap));
+    $('#guideRow').hidden = p.guide == null;
+    if (p.guide != null && !this.held('guide')) $('#guideShow').checked = !!p.guide;
+    const parts = [];
+    if (p.held != null) parts.push(`Held at ${p.held} fps to cool down`);
+    if (p.cpu != null) parts.push('Chip ' + Fmt.temp(p.cpu));
+    if (p.gpu != null) parts.push('graphics ' + Fmt.temp(p.gpu));
+    if (p.bat != null) parts.push('battery ' + Fmt.temp(p.bat));
+    const note = $('#perfNote');
+    note.textContent = parts.length ? parts.join(' · ') : 'Higher frame rates look smoother but make the device warmer.';
+    // a phone chip's hottest core runs at 80-90 under load; it slows itself down near 100
+    const cpu = Number(p.cpu) || 0;
+    note.classList.toggle('bad', cpu >= 97);
+    note.classList.toggle('warn', cpu >= 92 && cpu < 97);
+  },
+};
+
+// =================================================================== Journal
+
+/**
+ * The survivor's journal: a page a day, written as a diary in the character's own voice (by the
+ * game's offline writer, or the AI writer of the Android app when it's on), with what happened
+ * folded underneath (kills, skills, wounds, places, sleep) and your own notes, on paper like the
+ * game's notebooks.
+ */
+const Journal = {
+  init() {
+    this.unfolded = new Set();   // pages whose "what happened" is open
+    $('#journalPages').addEventListener('click', (e) => {
+      const f = e.target.closest('[data-fold]');
+      if (!f) return;
+      const facts = f.nextElementSibling;
+      if (!facts) return;
+      const show = facts.hidden;
+      facts.hidden = !show;
+      f.classList.toggle('open', show);
+      f.setAttribute('aria-expanded', String(show));
+      const d = Number(f.dataset.fold);
+      if (show) this.unfolded.add(d); else this.unfolded.delete(d);
+    });
+    $('#journalForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const s = $('#journalInput').value.trim();
+      if (!s) return;
+      command('note', { s }, null);
+      $('#journalInput').value = '';
+    });
+    $('#journalInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('#journalForm').requestSubmit(); }
+    });
+    // press and hold (or right-click) a note to tear it out
+    const pages = $('#journalPages');
+    let timer = 0;
+    const tear = (n) => this.confirmDelete(Number(n.dataset.day), Number(n.dataset.note));
+    pages.addEventListener('pointerdown', (e) => {
+      const n = e.target.closest('[data-note]');
+      if (!n) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => tear(n), 550);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave', 'scroll']) pages.addEventListener(ev, () => clearTimeout(timer), true);
+    pages.addEventListener('contextmenu', (e) => {
+      const n = e.target.closest('[data-note]');
+      if (!n) return;
+      e.preventDefault();
+      clearTimeout(timer);
+      tear(n);
+    });
+  },
+
+  journal(d) {
+    const sig = JSON.stringify(d);
+    if (sig === this.sig) return;
+    this.sig = sig;
+    const write = d.write !== false;
+    $('#journalForm').hidden = !write;
+    let html = write ? '' : "<p class=\"muted small pad-s\">Your character can't read or write, but the days still go by.</p>";
+    html += arr(d.days).map((p) => this.page(p, d.today, write)).join('');
+    $('#journalPages').innerHTML = html;
+  },
+
+  page(p, today, write) {
+    const d = p.d;
+    // the diary entry, in the character's hand: the AI writer's when one has been written, else the game's own
+    const ai = write && p.ai ? String(p.ai) : '';
+    const entry = ai || (write && p.entry ? String(p.entry) : '');
+    let html = '';
+    if (entry) html += `<p class="entry">${esc(entry)}</p>${ai ? '<p class="entry-by">written by AI</p>' : ''}`;
+    // what happened: folded under the entry, or the page itself when there's no entry
+    let facts = '', n = 0;
+    const kills = p.kills || 0;
+    if (kills > 0) { facts += this.line(kills === 1 ? 'Killed a zombie.' : `Killed ${kills} zombies.`, null, 'kill'); n++; }
+    for (const l of arr(p.lines)) { facts += this.line(l.s, l, l.k); n++; }
+    if (n && entry) {
+      const open = this.unfolded.has(d);
+      html += `<button class="fold${open ? ' open' : ''}" data-fold="${d}" aria-expanded="${open}">What happened (${n})${icon('chevron')}</button>
+        <div class="facts small"${open ? '' : ' hidden'}>${facts}</div>`;
+    } else if (n) {
+      html += `<div class="facts">${facts}</div>`;
+    }
+    arr(p.notes).forEach((note, i) => {
+      html += `<div class="note" data-day="${d}" data-note="${i + 1}" title="Press and hold to tear it out">${esc(note.s)}${note.w ? `<span class="when">${Fmt.clock(note.h, note.mi)}</span>` : ''}</div>`;
+      n++;
+    });
+    if (!n && !entry) html = `<p class="quiet">${d === today ? 'Nothing written yet today.' : 'A quiet day.'}</p>`;
+    return `<article class="page"><header><h3>Day ${d}</h3>${d === today ? '<span>Today</span>' : ''}</header>${html}</article>`;
+  },
+
+  /** One thing that happened (small and soft when it sits under the diary entry). */
+  line(text, l, kind) {
+    const bite = kind === 'bite';
+    return `<div class="jl${bite ? ' bite' : ''}"><i>•</i><span>${esc(text)}</span>${l && l.w ? `<span class="when">${Fmt.clock(l.h, l.mi)}</span>` : ''}</div>`;
+  },
+
+  confirmDelete(day, index) {
+    openSheet(sheetHead('Tear out this note?') + `<div class="acts">${act('trash', 'Tear it out', 'yes', '', 'danger')}${act('x', 'Keep it', 'no')}</div>`, {
+      yes: () => { command('noteDelete', { d: day, i: index }, null); closeSheet(); },
+      no: () => closeSheet(),
+    });
+  },
+};

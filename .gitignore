@@ -1,0 +1,9 @@
+# build tools (JDK, Android SDK, git/gh) and outputs
+.tools/
+build/
+dist/
+*.keystore
+
+# local notes and device-specific dev scripts
+LOG.md
+extras/dev-tools/
