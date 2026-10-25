@@ -105,7 +105,7 @@ SDK build-tools 35 + platform 35 (in `.tools/android-sdk`) and JDK 21.
 .\build.ps1            # Java server add-on -> mod\KnoxLinkServer\42\media\java\client\KnoxLinkServer.jar
 .\build.ps1 -Dev       # also the dev server with fake game data, for working on the clients
 .\build-apk.ps1        # Android app -> build\KnoxLink.apk
-.\package.ps1          # release folders + zip in dist\
+.\package.ps1          # release downloads in dist\release (mods zip, KnoxThor3D.zip, the app)
 ```
 
 The build is reproducible: the same sources give the same jar, byte for byte.
