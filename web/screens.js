@@ -627,8 +627,9 @@ const Gear = {
     this.weaponsSig = '';
     this.items = new Map();
     this.inContainer = new Map();   // item id -> the container of yours it's in (0 = your inventory, else the bag's id)
-    this.selecting = false;         // picking several items to move at once
+    this.selecting = false;         // "Move items": picking several items to move at once
     this.picked = new Set();
+    this.targetsSig = '';
     $('#gearSeg').addEventListener('click', (e) => { const b = e.target.closest('[data-seg]'); if (b) this.setSegment(b.dataset.seg); });
     $('#gearFilter').addEventListener('click', (e) => {
       if (e.target.closest('[data-select]')) { this.setSelecting(!this.selecting); return; }
@@ -639,15 +640,21 @@ const Gear = {
       if (S.gear) this.gear(S.gear);
     });
     $('#containers').addEventListener('click', (e) => {
+      const all = e.target.closest('[data-pickall]');
+      if (all) { this.pickAll(all.dataset.pickall.split(',').map(Number)); return; }
       const r = e.target.closest('[data-item]');
       if (!r) return;
       const id = Number(r.dataset.item);
       if (!this.selecting) { this.openItem(id); return; }
-      // picking several: a tap ticks it, the icon shows the tick
-      if (!this.picked.delete(id)) this.picked.add(id);
-      if (S.gear) this.gear(S.gear);
+      // picking several: a tap ticks it, the icon shows the tick (what you wear comes off first)
+      const it = this.items.get(id);
+      if (it && it.worn) { toast('Take it off first to move it', true); return; }
+      this.togglePick(id);
     });
-    $('#pickMove').addEventListener('click', () => this.movePicked());
+    $('#pickTargets').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-to]');
+      if (b) this.movePickedTo(b.dataset.to, b.dataset.where);
+    });
     $('#hands').addEventListener('click', (e) => {
       const h = e.target.closest('[data-hand]');
       if (h && this.items.has(Number(h.dataset.hand))) this.openItem(Number(h.dataset.hand));
@@ -698,7 +705,8 @@ const Gear = {
   },
 
   setSegment(s, first) {
-    if (s !== 'on' && this.selecting) this.setSelecting(false);
+    // moving items works on you and around you (straight from a shelf into a bag)
+    if (s === 'craft' && this.selecting) this.setSelecting(false);
     this.seg = s;
     store('kl.gearSeg', s);
     $('#gearOn').hidden = s !== 'on';
@@ -765,7 +773,7 @@ const Gear = {
     const conts = arr(d.containers);
     for (const c of conts) for (const it of arr(c.items)) { this.items.set(it.id, it); this.inContainer.set(it.id, c.id); }
     // picked things that went somewhere else aren't picked any more
-    for (const id of this.picked) if (!this.items.has(id)) this.picked.delete(id);
+    for (const id of this.picked) if (!this.items.has(id) && !this.aroundById(id)) this.picked.delete(id);
     this.updatePickBar();
     // the game resends the same list now and then: repainting it would swallow a tap in progress
     const sig = JSON.stringify(d) + this.filter + (this.selecting ? '|' + [...this.picked].join(',') : '');
@@ -787,7 +795,7 @@ const Gear = {
         if (worn.length) html += this.section('Wearing', 'shirt', null, worn);
         if (rows.length || this.filter === 'all') html += this.section('Carrying', 'gear', weight, rows);
       } else if (rows.length || this.filter === 'all') {
-        html += this.section(c.n, 'bag', weight, rows);
+        html += this.section(c.n, c.ring ? 'key' : 'bag', weight, rows);
       }
     }
     $('#containers').innerHTML = html || '<p class="none">Nothing here.</p>';
@@ -795,8 +803,15 @@ const Gear = {
 
   /** One section of what you have on you: a heading and its items in a card. */
   section(title, ic, right, rows) {
-    return `<div class="cont"><div class="cont-head">${icon(ic)}<b>${esc(title)}</b>${right != null ? `<span>${right}</span>` : ''}</div>
-      <div class="items">${rows.map((it) => itemRow(it, `data-item="${it.id}"`, this.selecting && this.picked.has(it.id))).join('') || '<p class="none pad">Empty</p>'}</div></div>`;
+    let all = '';
+    if (this.selecting) {
+      // the whole section in one tap (what you wear stays: it comes off first)
+      const ids = rows.filter((it) => !it.worn).map((it) => it.id);
+      if (ids.length) all = this.pickAllBtn(ids);
+    }
+    return `<div class="cont"><div class="cont-head">${icon(ic)}<b>${esc(title)}</b>${all}${right != null ? `<span>${right}</span>` : ''}</div>
+      <div class="items">${rows.map((it) => itemRow(it, `data-item="${it.id}"${this.selecting && it.worn ? ' data-worn="1"' : ''}`,
+        this.selecting && this.picked.has(it.id))).join('') || '<p class="none pad">Empty</p>'}</div></div>`;
   },
 
   // ------------------------------------------------------------ moving things
@@ -825,36 +840,80 @@ const Gear = {
     return out;
   },
 
-  /** The "Select" switch: tap items to pick them, then move them all at once. */
+  // "Move items": tap the items (or "All" for a whole bag or container), then tap where they go in the
+  // bar at the bottom. The bar stays for the next batch until "Done". Works around you too.
   setSelecting(on) {
     this.selecting = on;
     this.picked.clear();
     const b = $('#gearFilter [data-select]');
-    b.textContent = on ? 'Done' : 'Select';
+    b.textContent = on ? 'Done' : 'Move items';
     b.classList.toggle('on', on);
+    this.targetsSig = '';
+    this.pickChanged();
+  },
+
+  togglePick(id) {
+    if (!this.picked.delete(id)) this.picked.add(id);
+    this.pickChanged();
+  },
+
+  /** "All" on a section or container: picks every item in it, or none if they all were. */
+  pickAll(ids) {
+    if (ids.every((id) => this.picked.has(id))) ids.forEach((id) => this.picked.delete(id));
+    else ids.forEach((id) => this.picked.add(id));
+    this.pickChanged();
+  },
+
+  pickAllBtn(ids) {
+    return `<button class="mini-btn" data-pickall="${ids.join(',')}">${ids.every((id) => this.picked.has(id)) ? 'None' : 'All'}</button>`;
+  },
+
+  pickChanged() {
     if (S.gear) this.gear(S.gear);
+    this.lootSig = '';
+    if (S.loot) this.loot(S.loot);
     this.updatePickBar();
   },
 
-  updatePickBar() {
-    const n = this.picked.size;
-    $('#pickBar').hidden = !(this.selecting && n);
-    $('#pickCount').textContent = n === 1 ? '1 item' : `${n} items`;
+  /** An item around you by its id (a stack's first one), or null. */
+  aroundById(id) {
+    for (const c of arr(S.loot && S.loot.list)) {
+      const it = arr(c.items).find((x) => x.id === id);
+      if (it) return it;
+    }
+    return null;
   },
 
-  movePicked() {
+  /** The bar: how many are picked, and every place they can go (your bags, around you, the floor). */
+  updatePickBar() {
+    $('#pickBar').hidden = !this.selecting;
+    if (!this.selecting) return;
+    const n = this.picked.size;
+    $('#pickCount').textContent = n ? `${n === 1 ? '1 picked' : n + ' picked'} · tap where they go` : 'Tap the items to move, then where they go';
+    const targets = this.moveTargets(-1, null, null);
+    const sig = JSON.stringify([...targets]) + (n > 0);
+    if (sig === this.targetsSig) return;
+    this.targetsSig = sig;
+    const rings = new Set(arr(S.gear && S.gear.containers).filter((c) => c.ring).map((c) => 'bag:' + c.id));
+    const ic = (to) => (to === 'inv' ? 'gear' : to === 'floor' ? 'layers' : to.startsWith('near:') ? 'box' : rings.has(to) ? 'key' : 'bag');
+    const el = $('#pickTargets');
+    el.classList.toggle('idle', !n);
+    el.innerHTML = [...targets].map(([to, label]) => `<button data-to="${esc(to)}" data-where="${esc(label)}">${icon(ic(to))}${esc(label)}</button>`).join('');
+  },
+
+  movePickedTo(to, where) {
     const ids = [];
+    let worn = 0;
     for (const id of this.picked) {
-      const it = this.items.get(id);
-      if (!it || it.worn) continue;   // worn things come off first
+      const it = this.items.get(id) || this.aroundById(id);
+      if (!it) continue;
+      if (it.worn) { worn++; continue; }   // worn things come off first
       ids.push(...idsOf(it));
     }
-    if (!ids.length) { toast('Take worn things off first', true); return; }
-    const n = this.picked.size;
-    openSheet(sheetHead('Move ' + (n === 1 ? '1 item' : `${n} items`)) + moveToHtml(this.moveTargets(-1, null, null)), {
-      move: (b) => { command('move', { ids, to: b.dataset.to }, 'Moving'); closeSheet(); },
-    });
-    this.setSelecting(false);
+    if (!ids.length) { toast(worn ? 'Take worn things off first' : 'Tap the items to move first', true); return; }
+    command('move', { ids, to }, 'Moving to ' + where);
+    this.picked.clear();
+    this.pickChanged();
   },
 
   openItem(id) {
@@ -913,7 +972,8 @@ const Gear = {
     const list = arr(d.list), objs = arr(d.objs);
     const withItems = list.filter((c) => !c.floor && arr(c.items).length).length;
     $('#gearSeg [data-seg="around"]').textContent = withItems ? 'Around you · ' + withItems : 'Around you';
-    const sig = JSON.stringify(list) + JSON.stringify(objs) + settings.units;
+    this.updatePickBar();   // the containers around you are places to move things to
+    const sig = JSON.stringify(list) + JSON.stringify(objs) + settings.units + (this.selecting ? '|' + [...this.picked].join(',') : '');
     if (sig === this.lootSig) return;
     this.lootSig = sig;
     // the one the game has open first, then the ones with something in them, bodies nearest first; empty ones last
@@ -933,8 +993,8 @@ const Gear = {
       }
       return `<div class="card cont-card"><div class="cc-head">${pic}<span class="cc-main"><b>${esc(c.n)}</b>
           <span>${items.length ? sub : 'Empty'}</span></span>
-          ${items.length ? `<button class="mini-btn" data-takeall="${c.k}">Take all</button>` : ''}</div>
-        ${items.length ? `<div class="items flush">${items.map((it) => itemRow(it, `data-take="${it.id}" data-k="${c.k}"`)).join('')}</div>` : ''}</div>`;
+          ${!items.length ? '' : this.selecting ? this.pickAllBtn(items.map((it) => it.id)) : `<button class="mini-btn" data-takeall="${c.k}">Take all</button>`}</div>
+        ${items.length ? `<div class="items flush">${items.map((it) => itemRow(it, `data-take="${it.id}" data-k="${c.k}"`, this.selecting && this.picked.has(it.id))).join('')}</div>` : ''}</div>`;
     }).join('');
     // the things around you that have a menu of their own; one tap opens the game's menu for that spot
     if (objs.length) {
@@ -953,6 +1013,8 @@ const Gear = {
   },
 
   tapAround(e) {
+    const pick = e.target.closest('[data-pickall]');
+    if (pick) { this.pickAll(pick.dataset.pickall.split(',').map(Number)); return; }
     const all = e.target.closest('[data-takeall]');
     if (all) { command('takeAll', { k: Number(all.dataset.takeall) }, 'Taking'); return; }
     const obj = e.target.closest('[data-obj]');
@@ -964,6 +1026,7 @@ const Gear = {
     const row = e.target.closest('[data-take]');
     const found = row && this.aroundItem(row);
     if (!found) return;
+    if (this.selecting) { this.togglePick(found.it.id); return; }
     // one tap takes one; a stack asks how many
     if (!(found.it.cnt > 1)) command('take', { id: found.it.id }, 'Taking');
     else this.aroundSheet(found.it, found.cont);
@@ -971,7 +1034,9 @@ const Gear = {
 
   holdAround(row) {
     const found = this.aroundItem(row);
-    if (found) this.aroundSheet(found.it, found.cont);
+    if (!found) return;
+    if (this.selecting) this.togglePick(found.it.id);
+    else this.aroundSheet(found.it, found.cont);
   },
 
   /** Everything for an item around you: take it, take the whole stack, straight into a bag, or the game's own menu. */
@@ -1486,6 +1551,10 @@ const Game = {
       command('fps', { cap: Number(b.dataset.cap) }, null);
     });
     $('#perfAuto').addEventListener('change', (e) => { this.hold('auto'); command('perfMode', { auto: e.target.checked }, null); });
+    $('#perfBodies').addEventListener('change', (e) => {
+      this.hold('bodies');
+      command('perfMode', { bodies: e.target.checked }, e.target.checked ? 'Bodies in 3D' : 'Flat bodies');
+    });
     $('#guideShow').addEventListener('change', (e) => { this.hold('guide'); command('guide', { show: e.target.checked }, null); });
   },
 
@@ -1498,7 +1567,7 @@ const Game = {
     const p = core && core.perf;
     if (!p) return;
     // (a hold running out shows the game's own value again)
-    const sig = JSON.stringify(p) + settings.units + ['mode', 'auto', 'cap', 'guide'].filter((k) => this.held(k)).join();
+    const sig = JSON.stringify(p) + settings.units + ['mode', 'auto', 'cap', 'guide', 'bodies'].filter((k) => this.held(k)).join();
     if (sig === this.sig) return;
     this.sig = sig;
     $('#gameCard').hidden = false;
@@ -1507,6 +1576,8 @@ const Game = {
     $('#autoRow').hidden = !hasMode;
     if (!this.held('mode')) $$('#perfMode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === p.mode));
     if (!this.held('auto')) $('#perfAuto').checked = !!p.auto;
+    $('#bodiesRow').hidden = p.bodies == null;   // only with Project Viewpoint
+    if (p.bodies != null && !this.held('bodies')) $('#perfBodies').checked = !!p.bodies;
     const cap = p.unc ? 0 : Number(p.cap) || 0;
     if (!this.held('cap')) $$('#fpsSeg button').forEach((b) => b.classList.toggle('on', Number(b.dataset.cap) === cap));
     $('#guideRow').hidden = p.guide == null;

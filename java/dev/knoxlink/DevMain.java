@@ -19,7 +19,7 @@ public final class DevMain {
     // the body part a screen has open (its treatments go out with "body"), the radar's range, Settings > Game
     static int healthPart = -1, radarRange = 20, fpsCap = 60;
     static String perfMode = "balanced";
-    static boolean perfAuto = true, guideOn = false;
+    static boolean perfAuto = true, guideOn = false, bodiesOn = false;
 
     @SuppressWarnings("unchecked")
     public static void main(String[] args) throws Exception {
@@ -155,6 +155,7 @@ public final class DevMain {
                             fpsCap = "cool".equals(perfMode) ? 30 : "smooth".equals(perfMode) ? 90 : 60;
                         }
                         if (c.args.get("auto") != null) perfAuto = Boolean.TRUE.equals(c.args.get("auto"));
+                        if (c.args.get("bodies") != null) bodiesOn = Boolean.TRUE.equals(c.args.get("bodies"));
                         msg = null;
                         break;
                     case "fps":
@@ -342,7 +343,7 @@ public final class DevMain {
         core.put("can", m("bandage", true, "eat", true, "drink", false, "pills", true));
         // the frame-rate cap, the mode and heat control, the device's temperatures
         Map<String, Object> perf = m("cap", (double) fpsCap, "cpu", 71.5 + Math.sin(t / 8) * 4, "gpu", 62.0, "bat", 34.0,
-                "guide", guideOn, "mode", perfMode, "auto", perfAuto);
+                "guide", guideOn, "mode", perfMode, "auto", perfAuto, "bodies", bodiesOn);
         if (perfAuto && ((int) (t / 15)) % 2 == 1) perf.put("held", (double) Math.max(30, fpsCap - 15));
         core.put("perf", perf);
         if (imm) {
@@ -448,9 +449,11 @@ public final class DevMain {
                 m("id", 202.0, "n", "Vest", "t", "Base.Vest_Default", "c", "Clothing", "ic", "Item_VestGeneric", "w", 0.9, "a", l("wear")),
                 m("id", 203.0, "n", "Rotten Apple", "t", "Base.Apple", "c", "Food", "ic", "Item_AppleRotten", "w", 0.2, "food", m("hunger", -5.0, "rotten", true), "a", l("eat")),
                 m("id", 503.0, "n", "Shotgun", "t", "Base.Shotgun", "c", "Weapon", "ic", "Item_Firearm_PumpShotgun", "w", 4.0, "ammo", 2.0, "ammoMax", 6.0, "a", l("equip1")));
+        List<Object> keys = l(m("id", 311.0, "n", "House Key", "t", "Base.Key1", "c", "Key", "ic", "Item_Key1", "w", 0.0, "a", l()));
         return m("containers", l(
                 m("id", 0.0, "n", "Inventory", "w", 7.4, "cap", 8.0, "items", main),
-                m("id", 300.0, "n", "School Bag", "w", 4.0, "cap", 18.0, "items", bag)));
+                m("id", 300.0, "n", "School Bag", "w", 4.0, "cap", 18.0, "items", bag),
+                m("id", 310.0, "n", "Key Ring", "w", 0.1, "cap", 1.0, "ring", true, "items", keys)));
     }
 
     /** What the character wears (inner layers first), their hotbar and every weapon they carry. */

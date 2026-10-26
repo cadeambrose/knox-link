@@ -10,7 +10,7 @@
 <title>Knox Link</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="app.css?v=20261025c">
+<link rel="stylesheet" href="app.css?v=20261026b">
 </head>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
@@ -155,18 +155,18 @@
           <div class="card" id="hotbarCard" hidden><div class="card-head"><h2>Hotbar</h2><span class="sub">Tap to draw</span></div><div class="hotbar" id="hotbar"></div></div>
           <div class="card weight-card"><div class="card-head"><h2>Weight</h2><span class="sub" id="weightText"></span></div><div class="bar thick"><i id="weightBar"></i></div></div>
           <div class="chips" id="gearFilter">
-            <button data-select class="sel-chip" aria-label="Pick several items to move">Select</button>
+            <button data-select class="sel-chip" aria-label="Move several items at once">Move items</button>
             <button data-f="all" class="on">All</button><button data-f="food">Food &amp; drink</button><button data-f="medical">Medical</button>
             <button data-f="weapon">Weapons</button><button data-f="tool">Tools</button><button data-f="clothing">Clothing</button><button data-f="other">Other</button>
           </div>
           <div class="containers" id="containers"><p class="none">Opening your bags…</p></div>
-          <div class="pick-bar" id="pickBar" hidden><b id="pickCount">1 item</b><button class="btn primary" id="pickMove">Move to…</button></div>
         </div>
         <div id="gearAround" class="stack" hidden><div class="empty-state"><svg class="ico" aria-hidden="true"><use href="#i-box"/></svg><b>Nothing around you</b><p>Walk up to shelves, cupboards, cars or bodies. Whatever the game's loot window shows appears here, ready to take.</p></div></div>
         <div id="gearCraft" class="stack" hidden>
           <input class="field search" id="craftSearch" type="search" placeholder="Search what you can make" autocomplete="off" enterkeyhint="search">
           <div id="craftList" class="stack"><p class="none">Checking what you can make…</p></div>
         </div>
+        <div class="pick-bar" id="pickBar" hidden><b id="pickCount"></b><div class="pick-targets" id="pickTargets"></div></div>
       </div>
     </section>
 
@@ -238,6 +238,7 @@
           <div class="card-head"><h2>Game</h2></div>
           <div class="set-row" id="modeRow" hidden><span>Mode</span><div class="seg" id="perfMode"><button data-mode="cool">Cool</button><button data-mode="balanced">Balanced</button><button data-mode="smooth">Smooth</button></div></div>
           <label class="set-row toggle" id="autoRow" hidden><span>Cool down automatically when hot</span><input type="checkbox" id="perfAuto"><i></i></label>
+          <label class="set-row toggle" id="bodiesRow" hidden><span>Dead bodies in 3D<small class="set-sub">The nearest few in front of you</small></span><input type="checkbox" id="perfBodies"><i></i></label>
           <div class="set-row"><span>Frame rate</span><div class="seg" id="fpsSeg"><button data-cap="30">30</button><button data-cap="60">60</button><button data-cap="90">90</button><button data-cap="120">120</button></div></div>
           <label class="set-row toggle" id="guideRow" hidden><span>Survival guide when a save starts</span><input type="checkbox" id="guideShow"><i></i></label>
           <p class="set-note" id="perfNote">Higher frame rates look smoother but make the device warmer.</p>
@@ -294,11 +295,11 @@
   </div>
 </div>
 
-<script src="common.js?v=20261025c"></script>
-<script src="map.js?v=20261025c"></script>
-<script src="art.js?v=20261025c"></script>
-<script src="radar.js?v=20261025c"></script>
-<script src="screens.js?v=20261025c"></script>
-<script src="app.js?v=20261025c"></script>
+<script src="common.js?v=20261026b"></script>
+<script src="map.js?v=20261026b"></script>
+<script src="art.js?v=20261026b"></script>
+<script src="radar.js?v=20261026b"></script>
+<script src="screens.js?v=20261026b"></script>
+<script src="app.js?v=20261026b"></script>
 </body>
 </html>

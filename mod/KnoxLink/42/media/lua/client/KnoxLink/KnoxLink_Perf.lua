@@ -51,6 +51,25 @@ local function stepUp(cap, most)
     return cap
 end
 
+-- Dead bodies in Project Viewpoint's 3D view. Its lighter presets draw every one as a flat picture; this
+-- makes only the few nearest ones ahead of you real 3D models, cheaply: a short reach, a handful at most,
+-- a couple posed a frame, no shadows. The pool for their poses (about 1.2 MiB each) goes first.
+local BODIES_NEAR = {
+    { "memory.corpseMiB", "24" }, { "corpses.limit", "10" }, { "corpses.most", "8" }, { "corpses.band", "3" },
+    { "corpses.inView", "true" }, { "corpses.every", "false" }, { "corpses.posesPerFrame", "2" },
+    { "corpses.shadows", "false" }, { "corpses.models", "true" },
+}
+
+--- 3D bodies near you on or off; false when Viewpoint isn't there to draw them.
+function KL.applyBodies(on)
+    if not (KnoxLink_viewpointSetting and KL.viewState and KL.viewState()) then return false end
+    if not on then return KnoxLink_viewpointSetting("corpses.models", "false") end
+    for _, kv in ipairs(BODIES_NEAR) do
+        if not KnoxLink_viewpointSetting(kv[1], kv[2]) then return false end
+    end
+    return true
+end
+
 function KL.applyPerfMode(mode)
     local m = MODES[mode]
     if not m then return false end
@@ -69,14 +88,21 @@ function KL.perfChosen(cap)
     s.mode, s.cap, held = "custom", cap, nil
 end
 
---- For screens: { mode = "cool"|"balanced"|"smooth"|"custom", auto = bool, held = cap the heat control holds or nil }.
+--- For screens: { mode = "cool"|"balanced"|"smooth"|"custom", auto = bool, held = cap the heat control holds or nil,
+--- bodies = 3D bodies near you (only with Viewpoint) }.
 function KL.perfState()
     local s = settings()
-    return { mode = s.mode, auto = s.auto, held = held }
+    local bodies = nil
+    if KnoxLink_viewpointSetting and KL.viewState and KL.viewState() then bodies = s.bodies == true end
+    return { mode = s.mode, auto = s.auto, held = held, bodies = bodies }
 end
 
 KL.addHandler("perfMode", function(player, a)
     if a.mode ~= nil and not KL.applyPerfMode(tostring(a.mode)) then return false, "Unknown mode" end
+    if a.bodies ~= nil then
+        if not KL.applyBodies(a.bodies == true) then return false, "Only in Project Viewpoint's 3D view" end
+        settings().bodies = a.bodies == true
+    end
     if a.auto ~= nil then
         settings().auto = a.auto == true
         if held then
@@ -105,6 +131,7 @@ Events.OnTick.Add(function()
     if startAt and now >= startAt then
         startAt = nil
         if MODES[s.mode] then KL.applyPerfMode(s.mode) end
+        if s.bodies ~= nil then KL.applyBodies(s.bodies) end   -- only once chosen: Viewpoint's own setting otherwise
     end
     if not s.auto or not KnoxLink_device then return end
     local ok, d = pcall(KnoxLink_device)

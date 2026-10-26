@@ -310,11 +310,11 @@ end)
 KL.addHandler("move", function(player, a)
     local ids = type(a.ids) == "table" and a.ids or { a.id }
     local to = tostring(a.to or "")
-    local dest
+    local dest, bag
     if to == "inv" then
         dest = player:getInventory()
     elseif to:sub(1, 4) == "bag:" then
-        local bag = KL.findItem(player, tonumber(to:sub(5)))
+        bag = KL.findItem(player, tonumber(to:sub(5)))
         dest = bag and instanceof(bag, "InventoryContainer") and bag:getItemContainer() or nil
     elseif to:sub(1, 5) == "near:" or to == "floor" then
         dest = KL.nearContainer and KL.nearContainer(player, to) or nil
@@ -325,7 +325,12 @@ KL.addHandler("move", function(player, a)
         local item = KL.findItem(player, id) or (KL.findAround and KL.findAround(player, id))
         local src = item and item:getContainer()
         if item and src and src ~= dest then
-            if not try(dest, "hasRoomFor", true, player, item) then
+            if item == bag or try(dest, "isInside", false, item) then
+                why = "A bag can't go inside itself"
+            elseif not try(dest, "isItemAllowed", true, item) then
+                -- the game's own rule for that container: a key ring takes only keys
+                why = bag and KL.isKeyRing(bag) and "Only keys go on a key ring" or "That can't go in there"
+            elseif not try(dest, "hasRoomFor", true, player, item) then
                 why = "It doesn't fit"
             elseif player:isEquipped(item) and not (player:getPrimaryHandItem() == item or player:getSecondaryHandItem() == item) then
                 why = "Take it off first"   -- worn: the game wants it taken off before it goes anywhere

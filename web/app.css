@@ -388,9 +388,14 @@ button.tag.chip { cursor: pointer; }
 .chips button.sel-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .ii.pick { background: var(--accent); color: var(--accent-ink); }
 .ii.pick > .ico { width: 58%; height: 58%; stroke-width: 2.4; }
-.pick-bar { position: sticky; bottom: 10px; z-index: 4; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-radius: 16px; background: var(--text); color: var(--bg); box-shadow: var(--shadow); }
-.pick-bar b { flex: 1; min-width: 0; font-size: 1.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pick-bar .btn { min-height: 40px; }
+.pick-bar { position: sticky; bottom: 10px; z-index: 4; display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding: 10px 6px 10px 14px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.pick-bar b { font-size: .95em; padding-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-targets { display: flex; gap: 8px; padding-right: 8px; overflow-x: auto; scrollbar-width: none; }
+.pick-targets::-webkit-scrollbar { display: none; }
+.pick-targets button { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 14px 9px 12px; border-radius: 12px; background: var(--surface-2); color: var(--text); font-weight: 700; }
+.pick-targets button .ico { width: 18px; height: 18px; color: var(--accent); }
+.pick-targets.idle button, .pick-targets.idle button .ico { color: var(--text-3); }
+.item[data-worn] { opacity: .45; }
 
 /* ------------------------------------------------------------------ skills */
 
@@ -565,6 +570,7 @@ button.tag.chip { cursor: pointer; }
 
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 52px; border-top: 1px solid var(--line); padding: 6px 0; }
 .set-row > span:first-child { font-weight: 650; }
+.set-sub { display: block; margin-top: 2px; color: var(--text-3); font-size: .82em; font-weight: 500; }
 .card-head + .set-row { border-top: 0; }
 .toggle { cursor: pointer; }
 .toggle input { position: absolute; opacity: 0; pointer-events: none; }
@@ -750,6 +756,11 @@ button.tag.chip { cursor: pointer; }
   .rail button .rb-label { display: none; }
   .body-card { min-height: 0; height: calc(100dvh - var(--top-h) - 20px); }
   .mech { height: 240px; }
+}
+
+/* narrow phones: no room for the name and weather words next to the speed buttons, only for the weather icon */
+@media (max-width: 480px) and (orientation: portrait) {
+  .info-col { display: none; }
 }
 
 /* phones in portrait: tabs move to a bar at the bottom, the rest under "More" */

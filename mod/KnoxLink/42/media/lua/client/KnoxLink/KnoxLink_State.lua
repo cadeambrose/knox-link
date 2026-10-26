@@ -353,7 +353,7 @@ KL.addCollector("core", 250, function(player)
         -- the performance mode and the heat control (KnoxLink_Perf)
         if KL.perfState then
             local ps = KL.perfState()
-            data.perf.mode, data.perf.auto, data.perf.held = ps.mode, ps.auto, ps.held
+            data.perf.mode, data.perf.auto, data.perf.held, data.perf.bodies = ps.mode, ps.auto, ps.held, ps.bodies
         end
     end
 
@@ -676,6 +676,20 @@ KL.containerEntry = containerEntry
 
 local lastGearSig, lastGearAt = nil, 0
 
+--- A key ring: a container for keys only, that the game's inventory lists with your bags.
+function KL.isKeyRing(item)
+    if ItemType and ItemType.KEY_RING and try(item, "isItemType", false, ItemType.KEY_RING) then return true end
+    if ItemTag and ItemTag.KEY_RING and try(item, "hasTag", false, ItemTag.KEY_RING) then return true end
+    return try(item, "getType", "") == "KeyRing"   -- Build 41
+end
+
+--- The bags the game's inventory shows next to your own (ISInventoryPage.refreshBackpacks): the ones you
+--- wear or hold, and key rings.
+local function shownBag(player, item)
+    if not instanceof(item, "InventoryContainer") then return false end
+    return player:isEquipped(item) or try(item, "isEquipped", false) or KL.isKeyRing(item)
+end
+
 KL.addCollector("gear", 600, function(player)
     local inv = player:getInventory()
     local now = getTimestampMs()
@@ -698,8 +712,10 @@ KL.addCollector("gear", 600, function(player)
     local containers = { containerEntry(player, inv, "Inventory", 0, true) }
     for i = 0, items:size() - 1 do
         local it = items:get(i)
-        if instanceof(it, "InventoryContainer") and (player:isEquipped(it) or try(it, "isEquipped", false)) then
-            table.insert(containers, containerEntry(player, it:getItemContainer(), it:getDisplayName(), it:getID(), true))
+        if shownBag(player, it) then
+            local e = containerEntry(player, it:getItemContainer(), it:getDisplayName(), it:getID(), true)
+            if KL.isKeyRing(it) then e.ring = true end
+            table.insert(containers, e)
         end
     end
     return { containers = containers }

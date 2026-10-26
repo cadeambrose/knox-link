@@ -241,11 +241,13 @@ public final class LuaBridge {
 
     /**
      * Changes one of Project Viewpoint's settings live (what its own settings window does), for the
-     * one-tap performance modes. Only its level-of-detail and frame settings; false otherwise.
+     * one-tap performance modes and 3D bodies. Only its level-of-detail, model-pack and corpse
+     * settings; false otherwise.
      */
     @LuaMethod(name = "KnoxLink_viewpointSetting", global = true)
     public static boolean viewpointSetting(String key, String value) {
-        if (key == null || value == null || !(key.startsWith("lod.") || key.startsWith("memory.pack"))) return false;
+        if (key == null || value == null) return false;
+        if (!(key.startsWith("lod.") || key.startsWith("memory.pack") || key.startsWith("corpses.") || key.equals("memory.corpseMiB"))) return false;
         return viewpointPut(key, value);
     }
 

@@ -919,7 +919,7 @@ final class Screens {
     static final class Gear extends LinearLayout {
         private final Host host;
         private final Theme t;
-        private final LinearLayout handsRow, containers, chips, weaponsCard, weaponsRow, segRow;
+        private final LinearLayout handsRow, containers, chips, weaponsCard, weaponsRow, segRow, onYouCol;
         private String weaponsSig = "";
         private final Widgets.Bar weightBar;
         private final TextView weightText;
@@ -958,6 +958,7 @@ final class Screens {
             onYou.setVerticalScrollBarEnabled(false);
             LinearLayout col = Ui.col(c);
             col.setPadding(t.dp(12), t.dp(4), t.dp(12), t.dp(16));
+            onYouCol = col;
             onYou.addView(col);
             body.addView(onYou, new FrameLayout.LayoutParams(-1, -1));
             around = new Around(c, host, this);
@@ -1005,7 +1006,7 @@ final class Screens {
             }
             styleChips();
             col.addView(hs, Ui.margins(Ui.lp(-1, -2), 0, t.dp(12), 0, t.dp(6)));
-            buildPicking(c, col);
+            buildPicking(c);
             FrameLayout.LayoutParams bar = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
             bar.setMargins(t.dp(12), 0, t.dp(12), t.dp(12));
             body.addView(pickBar, bar);
@@ -1021,7 +1022,8 @@ final class Screens {
         }
 
         void setSegment(String s) {
-            if (!"on".equals(s) && selecting) setSelecting(false);
+            // moving items works on you and around you (straight from a shelf into a bag)
+            if ("craft".equals(s) && selecting) setSelecting(false);
             seg = s;
             host.prefs().edit().putString("gearSeg", s).apply();
             onYou.setVisibility("on".equals(s) ? VISIBLE : GONE);
@@ -1048,6 +1050,7 @@ final class Screens {
             }
             TextView b = (TextView) segRow.getChildAt(1);
             b.setText(withItems > 0 ? "Around you · " + withItems : "Around you");
+            updatePickBar();   // the containers around you are places to move things to
         }
 
         void craft(JSONObject d) {
@@ -1273,10 +1276,12 @@ final class Screens {
                     }
                 } else if (!rows.isEmpty() || filter.equals("all")) {
                     double cap = cont.optDouble("cap", 0);
-                    shown += section(c, cont.optString("n"), "bag", Fmt.num(cont.optDouble("w")) + (cap > 0 ? " / " + Fmt.num(cap) : ""), rows, shown);
+                    shown += section(c, cont.optString("n"), cont.optBoolean("ring") ? "key" : "bag",
+                            Fmt.num(cont.optDouble("w")) + (cap > 0 ? " / " + Fmt.num(cap) : ""), rows, shown);
                 }
             }
             if (shown == 0) containers.addView(Ui.text(c, t, "Nothing here.", 14, t.text3, false));
+            updatePickBar();
         }
 
         /** One section of what you have on you: a heading and its items in a card. Returns 1. */
@@ -1285,6 +1290,12 @@ final class Screens {
             head.setPadding(t.dp(4), t.dp(4), t.dp(4), t.dp(8));
             head.addView(Ui.icon(c, t, icon, t.text3, 20));
             head.addView(Ui.text(c, t, title, 16, t.text, true), Ui.margins(Ui.weight(1), t.dp(10), 0, 0, 0));
+            if (selecting) {
+                // the whole section in one tap (what you wear stays: it comes off first)
+                List<Long> ids = new ArrayList<>();
+                for (JSONObject it : rows) if (!it.optBoolean("worn")) ids.add(it.optLong("id"));
+                if (!ids.isEmpty()) head.addView(pickAllButton(c, ids), Ui.margins(Ui.lp(-2, -2), t.dp(8), 0, right != null ? t.dp(10) : 0, 0));
+            }
             if (right != null) head.addView(Ui.text(c, t, right, 13, t.text3, true));
             containers.addView(head, Ui.margins(Ui.lp(-1, -2), 0, before == 0 ? 0 : t.dp(14), 0, 0));
             LinearLayout box = Ui.col(c);
@@ -1402,11 +1413,12 @@ final class Screens {
                     iv.setTag(null);   // the item's picture, still on its way, doesn't replace the tick
                     iv.setImageDrawable(t.icon("check", t.accentInk));
                 }
-                r.setOnClickListener(v -> {
-                    if (!picked.remove(id)) picked.add(id);
-                    if (last != null) gear(last);
-                    updatePickBar();
-                });
+                if (it.optBoolean("worn")) {
+                    r.setAlpha(0.45f);
+                    r.setOnClickListener(v -> host.toast("Take it off first to move it", true));
+                } else {
+                    r.setOnClickListener(v -> togglePick(id));
+                }
             } else {
                 r.setOnClickListener(v -> openItem(id));
                 r.setOnLongClickListener(v -> { openItem(id); return true; });
@@ -1414,67 +1426,147 @@ final class Screens {
             return r;
         }
 
-        // ------------------------------------------------------------ picking several items
+        // ------------------------------------------------------------ moving many items at once
 
+        // "Move items": tap the items (or "All" for a whole bag or container), then tap where they go in
+        // the bar at the bottom. The bar stays for the next batch until "Done". Works around you too.
         private boolean selecting;
         private final java.util.LinkedHashSet<Long> picked = new java.util.LinkedHashSet<>();
-        private LinearLayout pickBar;
+        private LinearLayout pickBar, pickTargets;
         private TextView pickCount, selectBtn;
+        private String targetsSig = "";
 
-        /** The "Select" switch and the bar that moves what's picked (built once, under the list). */
-        private void buildPicking(Context c, LinearLayout col) {
-            selectBtn = Ui.text(c, t, "Select", 14, t.accent, true);
+        boolean picking() {
+            return selecting;
+        }
+
+        boolean isPicked(long id) {
+            return picked.contains(id);
+        }
+
+        /** Picks or unpicks an item (a stack is one row and moves whole). */
+        void togglePick(long id) {
+            if (!picked.remove(id)) picked.add(id);
+            pickChanged();
+        }
+
+        /** "All" on a section: picks every item in it, or none if they all were. */
+        View pickAllButton(Context c, List<Long> ids) {
+            boolean all = picked.containsAll(ids);
+            TextView b = Ui.text(c, t, all ? "None" : "All", 13.5f, t.accent, true);
+            b.setPadding(t.dp(12), t.dp(7), t.dp(12), t.dp(7));
+            b.setBackground(Ui.pressable(t, Theme.alpha(t.accent, 0.14f), 10));
+            b.setOnClickListener(v -> {
+                if (picked.containsAll(ids)) picked.removeAll(ids);
+                else picked.addAll(ids);
+                pickChanged();
+            });
+            return b;
+        }
+
+        private void pickChanged() {
+            if (last != null) gear(last);
+            around.redraw();
+            updatePickBar();
+        }
+
+        /** The "Move items" switch and the bar of places to move what's picked (built once, over the list). */
+        private void buildPicking(Context c) {
+            selectBtn = Ui.text(c, t, "Move items", 14, t.accent, true);
             selectBtn.setPadding(t.dp(15), t.dp(9), t.dp(15), t.dp(9));
             selectBtn.setBackground(Ui.pressable(t, Theme.alpha(t.accent, 0.14f), 99));
             selectBtn.setOnClickListener(v -> setSelecting(!selecting));
             chips.addView(selectBtn, 0, Ui.margins(Ui.lp(-2, -2), 0, 0, t.dp(8), 0));
 
-            pickBar = Ui.row(c);
-            pickBar.setBackground(t.round(t.text, 16));
-            pickBar.setPadding(t.dp(16), t.dp(8), t.dp(8), t.dp(8));
-            pickBar.setElevation(t.dpf(8));
-            pickCount = Ui.text(c, t, "", 15, t.bg, true);
-            pickBar.addView(pickCount, Ui.weight(1));
-            TextView move = Ui.text(c, t, "Move to…", 14.5f, t.accentInk, true);
-            move.setPadding(t.dp(16), t.dp(10), t.dp(16), t.dp(10));
-            move.setBackground(Ui.pressable(t, t.accent, 12));
-            move.setOnClickListener(v -> movePicked(c));
-            pickBar.addView(move);
+            pickBar = Ui.col(c);
+            android.graphics.drawable.GradientDrawable bg = t.round(t.surface, 18);
+            bg.setStroke(t.dp(1), t.line);
+            pickBar.setBackground(bg);
+            pickBar.setPadding(t.dp(14), t.dp(10), t.dp(6), t.dp(10));
+            pickBar.setElevation(t.dpf(10));
+            pickBar.setClickable(true);   // a tap between the buttons doesn't reach the list under it
+            pickCount = Ui.text(c, t, "", 14, t.text, true);
+            pickBar.addView(Ui.ellipsize(pickCount), Ui.margins(Ui.lp(-1, -2), t.dp(2), 0, t.dp(8), t.dp(8)));
+            HorizontalScrollView hs = new HorizontalScrollView(c);
+            hs.setHorizontalScrollBarEnabled(false);
+            pickTargets = Ui.row(c);
+            hs.addView(pickTargets);
+            pickBar.addView(hs, Ui.lp(-1, -2));
             pickBar.setVisibility(GONE);
         }
 
         private void setSelecting(boolean on) {
             selecting = on;
             picked.clear();
-            selectBtn.setText(on ? "Done" : "Select");
-            if (last != null) gear(last);
-            updatePickBar();
+            selectBtn.setText(on ? "Done" : "Move items");
+            targetsSig = "";
+            pickChanged();
         }
 
+        /** The bar: how many are picked, and every place they can go (your bags, around you, the floor). */
         private void updatePickBar() {
             if (pickBar == null) return;
-            pickBar.setVisibility(selecting && !picked.isEmpty() ? VISIBLE : GONE);
-            pickCount.setText(picked.size() == 1 ? "1 item" : picked.size() + " items");
+            pickBar.setVisibility(selecting ? VISIBLE : GONE);
+            int room = selecting ? t.dp(136) : t.dp(16);   // the last items stay above the bar
+            onYouCol.setPadding(t.dp(12), t.dp(4), t.dp(12), room);
+            around.setBottomRoom(room);
+            if (!selecting) return;
+            int n = picked.size();
+            pickCount.setText(n == 0 ? "Tap the items to move, then where they go"
+                    : (n == 1 ? "1 picked" : n + " picked") + " · tap where they go");
+            Map<String, String> targets = moveTargets(-1, null, null);
+            String sig = targets.toString() + (n > 0);
+            if (sig.equals(targetsSig)) return;
+            targetsSig = sig;
+            Context c = getContext();
+            pickTargets.removeAllViews();
+            for (Map.Entry<String, String> e : targets.entrySet()) {
+                String to = e.getKey(), where = e.getValue();
+                LinearLayout chip = Ui.row(c);
+                chip.setGravity(Gravity.CENTER_VERTICAL);
+                chip.setPadding(t.dp(12), t.dp(9), t.dp(14), t.dp(9));
+                chip.setBackground(Ui.pressable(t, t.surface2, 12));
+                chip.addView(Ui.icon(c, t, targetIcon(to), n > 0 ? t.accent : t.text3, 18));
+                chip.addView(Ui.text(c, t, where, 14, n > 0 ? t.text : t.text3, true), Ui.margins(Ui.lp(-2, -2), t.dp(8), 0, 0, 0));
+                chip.setOnClickListener(v -> movePickedTo(to, where));
+                pickTargets.addView(chip, Ui.margins(Ui.lp(-2, -2), 0, 0, t.dp(8), 0));
+            }
         }
 
-        private void movePicked(Context c) {
+        private String targetIcon(String to) {
+            if (to.equals("inv")) return "gear";
+            if (to.equals("floor")) return "layers";
+            if (to.startsWith("near:")) return "box";
+            if (last != null) {
+                JSONArray conts = Json.arr(last.opt("containers"));
+                for (int i = 0; i < conts.length(); i++) {
+                    JSONObject cont = conts.optJSONObject(i);
+                    if (cont != null && to.equals("bag:" + cont.optLong("id")) && cont.optBoolean("ring")) return "key";
+                }
+            }
+            return "bag";
+        }
+
+        private void movePickedTo(String to, String where) {
             JSONArray ids = new JSONArray();
+            int worn = 0;
             for (long id : picked) {
-                JSONObject it = items.get(id);
-                if (it == null || it.optBoolean("worn")) continue;   // worn things come off first
+                JSONObject it = items.containsKey(id) ? items.get(id) : around.item(id);
+                if (it == null) continue;
+                if (it.optBoolean("worn")) {   // worn things come off first
+                    worn++;
+                    continue;
+                }
                 JSONArray all = idsOf(it);
                 for (int i = 0; i < all.length(); i++) ids.put(all.opt(i));
             }
             if (ids.length() == 0) {
-                host.toast("Take worn things off first", true);
+                host.toast(worn > 0 ? "Take worn things off first" : "Tap the items to move first", true);
                 return;
             }
-            LinearLayout sheet = Ui.col(c);
-            sheet.addView(Ui.text(c, t, "Move " + (picked.size() == 1 ? "1 item" : picked.size() + " items"), 20, t.text, true),
-                    Ui.margins(Ui.lp(-2, -2), 0, 0, 0, t.dp(6)));
-            addMoveTo(c, sheet, moveTargets(-1, null, null), ids, "Moving");
-            host.openSheet(sheet);
-            setSelecting(false);
+            host.command("move", Ui.args("ids", ids, "to", to), "Moving to " + where);
+            picked.clear();
+            pickChanged();
         }
 
         private void openItem(long id) {
@@ -2322,8 +2414,8 @@ final class Screens {
 
         private final Host host;
         private final LinearLayout fpsRow, gameCard, modeRow;
-        private final View guideRow;
-        private final Switch guideSwitch, autoSwitch;
+        private final View guideRow, bodiesRow;
+        private final Switch guideSwitch, autoSwitch, bodiesSwitch;
         private String shownMode = "";
         private static final String[][] MODES = {{"cool", "Cool"}, {"balanced", "Balanced"}, {"smooth", "Smooth"}};
         private final TextView tempText;
@@ -2360,6 +2452,12 @@ final class Screens {
                 autoSwitch.setTag(Boolean.TRUE);
                 autoSwitch.setChecked(p.optBoolean("auto"));
                 autoSwitch.setTag(null);
+            }
+            bodiesRow.setVisibility(p.has("bodies") ? VISIBLE : GONE);   // only with Project Viewpoint
+            if (p.has("bodies") && bodiesSwitch.isChecked() != p.optBoolean("bodies")) {
+                bodiesSwitch.setTag(Boolean.TRUE);
+                bodiesSwitch.setChecked(p.optBoolean("bodies"));
+                bodiesSwitch.setTag(null);
             }
             int cap = p.optBoolean("unc") ? 0 : p.optInt("cap", 0);
             if (cap != shownCap) {
@@ -2425,6 +2523,21 @@ final class Screens {
             ra.addView(autoSwitch);
             ra.setVisibility(GONE);
             game.addView(ra);
+            // Project Viewpoint's lighter presets draw dead bodies as flat pictures: the nearest few in 3D, cheaply
+            LinearLayout rb = Ui.row(c);
+            rb.setMinimumHeight(t.dp(56));
+            LinearLayout rbText = Ui.col(c);
+            rbText.addView(Ui.text(c, t, "Dead bodies in 3D", 15, t.text, true));
+            rbText.addView(Ui.text(c, t, "The nearest few in front of you", 12.5f, t.text3, false), Ui.margins(Ui.lp(-2, -2), 0, t.dp(2), 0, 0));
+            rb.addView(rbText, Ui.weight(1));
+            bodiesSwitch = switchView(c, t);
+            bodiesSwitch.setOnCheckedChangeListener((v, on) -> {
+                if (v.getTag() == null) host.command("perfMode", Ui.args("bodies", on), on ? "Bodies in 3D" : "Flat bodies");
+            });
+            rb.addView(bodiesSwitch);
+            rb.setVisibility(GONE);
+            bodiesRow = rb;
+            game.addView(rb);
             LinearLayout r0 = Ui.row(c);
             r0.setMinimumHeight(t.dp(52));
             r0.addView(Ui.text(c, t, "Frame rate", 15, t.text, true), Ui.weight(1));

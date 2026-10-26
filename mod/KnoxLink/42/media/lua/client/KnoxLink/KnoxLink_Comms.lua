@@ -144,8 +144,20 @@ local function isStatic(line)
     return line:match("^%s*<[%a%-%s]+>%s*$") ~= nil or line:match("^%s*$") ~= nil
 end
 
+-- a music note, made here: the game's Lua reader keeps only the low byte of characters written in a script
+local NOTE = string.char(9834)
+
+--- A broadcast line without the game's own markup: "[img=music]" is its music note, other [tags] set colours
+--- or layout for its speech bubbles.
+local function plain(line)
+    local s = line:gsub("%[img=music%]", NOTE):gsub("%[/?%a+[^%]]*%]", "")
+    return (s:gsub("%s%s+", " "):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
 local function onDeviceText(guid, codes, x, y, z, line, device)
     if type(line) ~= "string" or isStatic(line) then return end
+    line = plain(line)
+    if line == "" then return end
     local player = getPlayer()
     if not player or player:isDead() then return end
     if not hears(player, x, y, z, device) then return end
@@ -186,9 +198,15 @@ KL.addCollector("radio", 1000, function(player)
     if radioVersion == radioSent then return nil end
     radioSent = radioVersion
     local log = radioLog(player)
-    -- newest first
+    -- newest first; lines kept by older versions may still carry the game's markup
     local out = {}
-    for i = #log, 1, -1 do table.insert(out, log[i]) end
+    for i = #log, 1, -1 do
+        local e, c = log[i], {}
+        for k, v in pairs(e) do c[k] = v end
+        c.l = {}
+        for j, l in ipairs(e.l or {}) do c.l[j] = plain(tostring(l)) end
+        table.insert(out, c)
+    end
     return { n = KL.radioCount, list = out }
 end)
 

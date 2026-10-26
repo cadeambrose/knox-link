@@ -27,6 +27,7 @@ final class Around extends ScrollView {
     private final Screens.Gear gear;
     private final LinearLayout col;
     private String sig = "";
+    private JSONObject data;   // the last "loot" message
 
     Around(Context c, Host host, Screens.Gear gear) {
         super(c);
@@ -52,8 +53,35 @@ final class Around extends ScrollView {
         return box;
     }
 
+    /** Draws it again: what's picked to move changed. */
+    void redraw() {
+        sig = "";
+        if (data != null) loot(data);
+    }
+
+    /** Room under the list, so the move bar doesn't cover the last items. */
+    void setBottomRoom(int px) {
+        col.setPadding(t.dp(12), t.dp(4), t.dp(12), px);
+    }
+
+    /** An item around you by its id (a stack's first one), or null. */
+    JSONObject item(long id) {
+        if (data == null) return null;
+        JSONArray list = Screens.Json.arr(data.opt("list"));
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject cont = list.optJSONObject(i);
+            JSONArray items = cont == null ? null : Screens.Json.arr(cont.opt("items"));
+            for (int k = 0; items != null && k < items.length(); k++) {
+                JSONObject it = items.optJSONObject(k);
+                if (it != null && it.optLong("id") == id) return it;
+            }
+        }
+        return null;
+    }
+
     void loot(JSONObject d) {
-        String s = d.toString();
+        data = d;
+        String s = d.toString() + gear.picking();
         if (s.equals(sig)) return;
         sig = s;
         Context c = getContext();
@@ -134,7 +162,15 @@ final class Around extends ScrollView {
         }
         ht.addView(Ui.text(c, t, items.length() == 0 ? "Empty" : weight, 12.5f, t.text3, true), Ui.margins(Ui.lp(-2, -2), 0, t.dp(2), 0, 0));
         head.addView(ht, Ui.margins(Ui.weight(1), t.dp(10), 0, t.dp(8), 0));
-        if (items.length() > 0) {
+        if (items.length() > 0 && gear.picking()) {
+            // moving items: pick the whole container in one tap
+            java.util.List<Long> ids = new java.util.ArrayList<>();
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject it = items.optJSONObject(i);
+                if (it != null) ids.add(it.optLong("id"));
+            }
+            head.addView(gear.pickAllButton(c, ids));
+        } else if (items.length() > 0) {
             TextView all = Ui.text(c, t, "Take all", 13.5f, t.accent, true);
             all.setPadding(t.dp(12), t.dp(8), t.dp(12), t.dp(8));
             all.setBackground(Ui.pressable(t, Theme.alpha(t.accent, 0.14f), 10));
@@ -159,7 +195,21 @@ final class Around extends ScrollView {
         r.setMinimumHeight(t.dp(54));
         r.setPadding(t.dp(12), t.dp(7), t.dp(14), t.dp(7));
         r.setBackground(Ui.pressable(t, 0x00000000, 0));
-        r.addView(Screens.itemIcon(c, host, it.optString("ic"), Screens.Gear.fallbackIcon(it), 38));
+        long id = it.optLong("id");
+        boolean picked = gear.picking() && gear.isPicked(id);
+        if (picked) {
+            // picked to move: the tick takes the picture's place
+            FrameLayout tick = new FrameLayout(c);
+            tick.setBackground(t.round(t.accent, 11));
+            ImageView iv = new ImageView(c);
+            int pad = t.dp(8);
+            iv.setPadding(pad, pad, pad, pad);
+            iv.setImageDrawable(t.icon("check", t.accentInk));
+            tick.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+            r.addView(tick, Ui.lp(t.dp(38), t.dp(38)));
+        } else {
+            r.addView(Screens.itemIcon(c, host, it.optString("ic"), Screens.Gear.fallbackIcon(it), 38));
+        }
         LinearLayout txt = Ui.col(c);
         int cnt = it.optInt("cnt", 1);
         txt.addView(Ui.ellipsize(Ui.text(c, t, it.optString("n") + (cnt > 1 ? "  ×" + cnt : ""), 15, t.text, true)));
@@ -171,6 +221,10 @@ final class Around extends ScrollView {
         }
         r.addView(txt, Ui.margins(Ui.weight(1), t.dp(12), 0, t.dp(8), 0));
         r.addView(Ui.text(c, t, Fmt.num(it.optDouble("w")), 13, t.text3, true));
+        if (gear.picking()) {
+            r.setOnClickListener(v -> gear.togglePick(id));
+            return r;
+        }
         // one tap takes one (a stack asks how many); holding it opens everything else
         r.setOnClickListener(v -> {
             if (cnt <= 1) host.command("take", Ui.args("id", it.optLong("id")), "Taking");
