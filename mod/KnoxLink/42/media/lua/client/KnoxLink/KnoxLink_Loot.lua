@@ -33,8 +33,11 @@ local function bodies(player)
                     local c = body and try(body, "getContainer", nil)
                     if c and c:getItems():size() > 0 then
                         local dx, dy = x + 0.5 - player:getX(), y + 0.5 - player:getY()
-                        local name = try(body, "isZombie", false) and "Dead zombie" or "Dead body"
-                        table.insert(out, { c = c, name = name, corpse = true, sq = sq, d = math.sqrt(dx * dx + dy * dy) })
+                        local zombie = try(body, "isZombie", false)
+                        local name = zombie and "Dead zombie" or "Dead body"
+                        -- the loot window's own picture for a body (ContainerButtonIcons)
+                        local ic = "Container_DeadPerson_" .. (try(body, "isFemale", false) and "Female" or "Male") .. (zombie and "Zombie" or "")
+                        table.insert(out, { c = c, name = name, corpse = true, sq = sq, d = math.sqrt(dx * dx + dy * dy), ic = ic })
                     end
                 end
             end
@@ -52,7 +55,15 @@ local function nearby(player)
     if page and page.backpacks then
         for _, b in ipairs(page.backpacks) do
             if b and b.inventory then
-                table.insert(out, { c = b.inventory, name = b.name, btn = b })
+                local e = { c = b.inventory, name = b.name, btn = b }
+                -- a body the loot window lists itself (the one at your feet) is a body like the others
+                local parent = try(b.inventory, "getParent", nil)
+                if parent and instanceof(parent, "IsoDeadBody") then
+                    local sq = try(parent, "getSquare", nil)
+                    e.corpse = true
+                    e.d = sq and math.sqrt((sq:getX() + 0.5 - player:getX()) ^ 2 + (sq:getY() + 0.5 - player:getY()) ^ 2) or 0
+                end
+                table.insert(out, e)
                 have[b.inventory] = true
             end
         end
@@ -107,7 +118,7 @@ KL.addCollector("loot", 600, function(player)
         local entry = KL.containerEntry(player, e.c, e.name or tostring(e.c:getType()), i, true)
         entry.k = i
         entry.type = tostring(e.c:getType())
-        entry.ic = iconPath(e.btn)
+        entry.ic = iconPath(e.btn) or e.ic
         entry.cap = (e.btn and e.btn.capacity) or entry.cap
         if e.c == selected then entry.sel = true end
         if entry.type == "floor" then entry.floor = true end

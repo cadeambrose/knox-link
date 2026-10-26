@@ -354,6 +354,7 @@ KL.addCollector("core", 250, function(player)
         if KL.perfState then
             local ps = KL.perfState()
             data.perf.mode, data.perf.auto, data.perf.held, data.perf.bodies = ps.mode, ps.auto, ps.held, ps.bodies
+            data.perf.rest = ps.rest
         end
     end
 
@@ -708,12 +709,16 @@ KL.addCollector("gear", 600, function(player)
     if sig == lastGearSig and now - lastGearAt < 4000 then return nil end
     lastGearSig, lastGearAt = sig, now
 
-    -- with every item id of a stack, so a screen can move them all
-    local containers = { containerEntry(player, inv, "Inventory", 0, true) }
+    -- with every item id of a stack, so a screen can move them all; each with the game's own picture for it
+    -- (the inventory button's, or the bag's own icon)
+    local main = containerEntry(player, inv, "Inventory", 0, true)
+    main.ic = "Icon_InventoryBasic"
+    local containers = { main }
     for i = 0, items:size() - 1 do
         local it = items:get(i)
         if shownBag(player, it) then
             local e = containerEntry(player, it:getItemContainer(), it:getDisplayName(), it:getID(), true)
+            e.ic = KL.iconOf(it)
             if KL.isKeyRing(it) then e.ring = true end
             table.insert(containers, e)
         end

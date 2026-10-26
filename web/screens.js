@@ -53,6 +53,16 @@ function itemRow(it, attrs = '', picked = false) {
     <span class="it-w">${num(it.w)}</span></button>`;
 }
 
+/**
+ * The game's own picture for a place (its inventory button, a bag's or key ring's icon, the loot window's
+ * floor, container or body picture): a loose file under media/ui first, else a texture-pack picture.
+ */
+function placePic(ic, fallback, cls = 'flat') {
+  const s = String(ic || '');
+  const name = s.replace(/^.*[/\\]/, '').replace(/\.png$/i, '');
+  return itemIcon(s ? (/\.png$/i.test(s) && s.startsWith('ui/') ? 'media:' + s + '|' : '') + name : '', fallback, cls);
+}
+
 /** Every item id of a row: a stack lists them all, so all of it moves. */
 function idsOf(it) {
   const ids = arr(it && it.ids);
@@ -793,23 +803,23 @@ const Gear = {
       if (c.id === 0) {
         if (hands.length) html += this.section('In your hands', 'hand', null, hands);
         if (worn.length) html += this.section('Wearing', 'shirt', null, worn);
-        if (rows.length || this.filter === 'all') html += this.section('Carrying', 'gear', weight, rows);
+        if (rows.length || this.filter === 'all') html += this.section('Carrying', 'gear', weight, rows, c.ic);
       } else if (rows.length || this.filter === 'all') {
-        html += this.section(c.n, c.ring ? 'key' : 'bag', weight, rows);
+        html += this.section(c.n, c.ring ? 'key' : 'bag', weight, rows, c.ic);
       }
     }
     $('#containers').innerHTML = html || '<p class="none">Nothing here.</p>';
   },
 
   /** One section of what you have on you: a heading and its items in a card. */
-  section(title, ic, right, rows) {
+  section(title, ic, right, rows, tex) {
     let all = '';
     if (this.selecting) {
       // the whole section in one tap (what you wear stays: it comes off first)
       const ids = rows.filter((it) => !it.worn).map((it) => it.id);
       if (ids.length) all = this.pickAllBtn(ids);
     }
-    return `<div class="cont"><div class="cont-head">${icon(ic)}<b>${esc(title)}</b>${all}${right != null ? `<span>${right}</span>` : ''}</div>
+    return `<div class="cont"><div class="cont-head">${tex ? placePic(tex, ic, 'flat head') : icon(ic)}<b>${esc(title)}</b>${all}${right != null ? `<span>${right}</span>` : ''}</div>
       <div class="items">${rows.map((it) => itemRow(it, `data-item="${it.id}"${this.selecting && it.worn ? ' data-worn="1"' : ''}`,
         this.selecting && this.picked.has(it.id))).join('') || '<p class="none pad">Empty</p>'}</div></div>`;
   },
@@ -894,11 +904,28 @@ const Gear = {
     const sig = JSON.stringify([...targets]) + (n > 0);
     if (sig === this.targetsSig) return;
     this.targetsSig = sig;
-    const rings = new Set(arr(S.gear && S.gear.containers).filter((c) => c.ring).map((c) => 'bag:' + c.id));
-    const ic = (to) => (to === 'inv' ? 'gear' : to === 'floor' ? 'layers' : to.startsWith('near:') ? 'box' : rings.has(to) ? 'key' : 'bag');
     const el = $('#pickTargets');
     el.classList.toggle('idle', !n);
-    el.innerHTML = [...targets].map(([to, label]) => `<button data-to="${esc(to)}" data-where="${esc(label)}">${icon(ic(to))}${esc(label)}</button>`).join('');
+    el.innerHTML = [...targets].map(([to, label]) => {
+      const [tex, fb] = this.targetPicture(to);
+      return `<button data-to="${esc(to)}" data-where="${esc(label)}">${placePic(tex, fb, 'flat chip')}${esc(label)}</button>`;
+    }).join('');
+  },
+
+  /** The game's own picture for a place to move to (the inventory button, a bag's icon, the loot window's), and the line icon until then. */
+  targetPicture(to) {
+    if (to === 'inv') return ['Icon_InventoryBasic', 'gear'];
+    if (to.startsWith('bag:')) {
+      const c = arr(S.gear && S.gear.containers).find((x) => 'bag:' + x.id === to);
+      return [c && c.ic, c && c.ring ? 'key' : 'bag'];
+    }
+    const list = arr(S.loot && S.loot.list);
+    if (to === 'floor') {
+      const c = list.find((x) => x.floor);
+      return [(c && c.ic) || 'Container_Floor', 'layers'];
+    }
+    const c = list.find((x) => 'near:' + x.k === to);
+    return [c && c.ic, 'box'];
   },
 
   movePickedTo(to, where) {
@@ -982,10 +1009,7 @@ const Gear = {
     let html = order.map((c) => {
       const items = arr(c.items);
       // the loot window's own button picture: a loose file under media/ui, or one from the packs
-      const ic = String(c.ic || '');
-      const name = ic.replace(/^.*[/\\]/, '').replace(/\.png$/i, '');
-      const fb = c.floor ? 'layers' : 'box';
-      const pic = itemIcon(ic ? (/\.png$/i.test(ic) && ic.startsWith('ui/') ? 'media:' + ic + '|' : '') + name : '', fb, 'flat');
+      const pic = placePic(c.ic, c.floor ? 'layers' : 'box');
       let sub = num(c.w) + (c.cap > 0 ? ' / ' + num(c.cap) : '');
       if (c.corpse) {
         const away = Number(c.d) || 0;
@@ -1551,6 +1575,7 @@ const Game = {
       command('fps', { cap: Number(b.dataset.cap) }, null);
     });
     $('#perfAuto').addEventListener('change', (e) => { this.hold('auto'); command('perfMode', { auto: e.target.checked }, null); });
+    $('#perfRest').addEventListener('change', (e) => { this.hold('rest'); command('perfMode', { rest: e.target.checked }, null); });
     $('#perfBodies').addEventListener('change', (e) => {
       this.hold('bodies');
       command('perfMode', { bodies: e.target.checked }, e.target.checked ? 'Bodies in 3D' : 'Flat bodies');
@@ -1567,7 +1592,7 @@ const Game = {
     const p = core && core.perf;
     if (!p) return;
     // (a hold running out shows the game's own value again)
-    const sig = JSON.stringify(p) + settings.units + ['mode', 'auto', 'cap', 'guide', 'bodies'].filter((k) => this.held(k)).join();
+    const sig = JSON.stringify(p) + settings.units + ['mode', 'auto', 'cap', 'guide', 'bodies', 'rest'].filter((k) => this.held(k)).join();
     if (sig === this.sig) return;
     this.sig = sig;
     $('#gameCard').hidden = false;
@@ -1578,6 +1603,8 @@ const Game = {
     if (!this.held('auto')) $('#perfAuto').checked = !!p.auto;
     $('#bodiesRow').hidden = p.bodies == null;   // only with Project Viewpoint
     if (p.bodies != null && !this.held('bodies')) $('#perfBodies').checked = !!p.bodies;
+    $('#restRow').hidden = p.rest == null;
+    if (p.rest != null && !this.held('rest')) $('#perfRest').checked = !!p.rest;
     const cap = p.unc ? 0 : Number(p.cap) || 0;
     if (!this.held('cap')) $$('#fpsSeg button').forEach((b) => b.classList.toggle('on', Number(b.dataset.cap) === cap));
     $('#guideRow').hidden = p.guide == null;

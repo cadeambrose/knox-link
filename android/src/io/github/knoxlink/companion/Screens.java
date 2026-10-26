@@ -1272,11 +1272,12 @@ final class Screens {
                     if (!worn.isEmpty()) shown += section(c, "Wearing", "shirt", null, worn, shown);
                     double cap = cont.optDouble("cap", 0);
                     if (!rows.isEmpty() || filter.equals("all")) {
-                        shown += section(c, "Carrying", "gear", Fmt.num(cont.optDouble("w")) + (cap > 0 ? " / " + Fmt.num(cap) : ""), rows, shown);
+                        shown += section(c, "Carrying", "gear", cont.optString("ic", null),
+                                Fmt.num(cont.optDouble("w")) + (cap > 0 ? " / " + Fmt.num(cap) : ""), rows, shown);
                     }
                 } else if (!rows.isEmpty() || filter.equals("all")) {
                     double cap = cont.optDouble("cap", 0);
-                    shown += section(c, cont.optString("n"), cont.optBoolean("ring") ? "key" : "bag",
+                    shown += section(c, cont.optString("n"), cont.optBoolean("ring") ? "key" : "bag", cont.optString("ic", null),
                             Fmt.num(cont.optDouble("w")) + (cap > 0 ? " / " + Fmt.num(cap) : ""), rows, shown);
                 }
             }
@@ -1284,11 +1285,38 @@ final class Screens {
             updatePickBar();
         }
 
+        /**
+         * The game's own picture for a place (its inventory button, a bag's or key ring's icon, the loot
+         * window's floor or body picture): a file under media/ when it has a path, else a texture-pack
+         * picture. The line icon shows until it has loaded, or when there is none.
+         */
+        ImageView placeIcon(Context c, String tex, String fallback, int color, int dp) {
+            ImageView iv = new ImageView(c);
+            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            iv.setImageDrawable(t.icon(fallback, color));
+            iv.setLayoutParams(new LinearLayout.LayoutParams(t.dp(dp), t.dp(dp)));
+            if (tex == null || tex.isEmpty()) return iv;
+            Bitmap hit = host.art().peek(tex.contains("/") ? "m" : "i", tex);
+            if (hit != null) {
+                iv.setImageBitmap(hit);
+                return iv;
+            }
+            iv.setTag(tex);
+            ArtCache.Cb got = b -> { if (b != null && tex.equals(iv.getTag())) iv.setImageBitmap(b); };
+            if (tex.contains("/")) host.art().media(tex, got);
+            else host.art().icon(tex, got);
+            return iv;
+        }
+
         /** One section of what you have on you: a heading and its items in a card. Returns 1. */
         private int section(Context c, String title, String icon, String right, List<JSONObject> rows, int before) {
+            return section(c, title, icon, null, right, rows, before);
+        }
+
+        private int section(Context c, String title, String icon, String tex, String right, List<JSONObject> rows, int before) {
             LinearLayout head = Ui.row(c);
             head.setPadding(t.dp(4), t.dp(4), t.dp(4), t.dp(8));
-            head.addView(Ui.icon(c, t, icon, t.text3, 20));
+            head.addView(tex == null ? Ui.icon(c, t, icon, t.text3, 20) : placeIcon(c, tex, icon, t.text3, 26));
             head.addView(Ui.text(c, t, title, 16, t.text, true), Ui.margins(Ui.weight(1), t.dp(10), 0, 0, 0));
             if (selecting) {
                 // the whole section in one tap (what you wear stays: it comes off first)
@@ -1526,11 +1554,35 @@ final class Screens {
                 chip.setGravity(Gravity.CENTER_VERTICAL);
                 chip.setPadding(t.dp(12), t.dp(9), t.dp(14), t.dp(9));
                 chip.setBackground(Ui.pressable(t, t.surface2, 12));
-                chip.addView(Ui.icon(c, t, targetIcon(to), n > 0 ? t.accent : t.text3, 18));
+                ImageView pic = placeIcon(c, targetPicture(to), targetIcon(to), n > 0 ? t.accent : t.text3, 24);
+                pic.setAlpha(n > 0 ? 1f : 0.5f);
+                chip.addView(pic);
                 chip.addView(Ui.text(c, t, where, 14, n > 0 ? t.text : t.text3, true), Ui.margins(Ui.lp(-2, -2), t.dp(8), 0, 0, 0));
                 chip.setOnClickListener(v -> movePickedTo(to, where));
                 pickTargets.addView(chip, Ui.margins(Ui.lp(-2, -2), 0, 0, t.dp(8), 0));
             }
+        }
+
+        /** The game's own picture for a place to move to: the inventory button, a bag's icon, the loot window's. */
+        private String targetPicture(String to) {
+            if (to.equals("inv")) return "Icon_InventoryBasic";
+            if (to.startsWith("bag:") && last != null) {
+                JSONArray conts = Json.arr(last.opt("containers"));
+                for (int i = 0; i < conts.length(); i++) {
+                    JSONObject cont = conts.optJSONObject(i);
+                    if (cont != null && to.equals("bag:" + cont.optLong("id"))) return cont.optString("ic", null);
+                }
+            }
+            if ((to.equals("floor") || to.startsWith("near:")) && lootData != null) {
+                JSONArray list = Json.arr(lootData.opt("list"));
+                for (int i = 0; i < list.length(); i++) {
+                    JSONObject cont = list.optJSONObject(i);
+                    if (cont == null) continue;
+                    boolean hit = to.equals("floor") ? cont.optBoolean("floor") : to.equals("near:" + cont.optInt("k"));
+                    if (hit) return cont.optString("ic", to.equals("floor") ? "Container_Floor" : null);
+                }
+            }
+            return to.equals("floor") ? "Container_Floor" : null;
         }
 
         private String targetIcon(String to) {
@@ -2414,8 +2466,8 @@ final class Screens {
 
         private final Host host;
         private final LinearLayout fpsRow, gameCard, modeRow;
-        private final View guideRow, bodiesRow;
-        private final Switch guideSwitch, autoSwitch, bodiesSwitch;
+        private final View guideRow, bodiesRow, restRow;
+        private final Switch guideSwitch, autoSwitch, bodiesSwitch, restSwitch;
         private String shownMode = "";
         private static final String[][] MODES = {{"cool", "Cool"}, {"balanced", "Balanced"}, {"smooth", "Smooth"}};
         private final TextView tempText;
@@ -2458,6 +2510,12 @@ final class Screens {
                 bodiesSwitch.setTag(Boolean.TRUE);
                 bodiesSwitch.setChecked(p.optBoolean("bodies"));
                 bodiesSwitch.setTag(null);
+            }
+            restRow.setVisibility(p.has("rest") ? VISIBLE : GONE);
+            if (p.has("rest") && restSwitch.isChecked() != p.optBoolean("rest")) {
+                restSwitch.setTag(Boolean.TRUE);
+                restSwitch.setChecked(p.optBoolean("rest"));
+                restSwitch.setTag(null);
             }
             int cap = p.optBoolean("unc") ? 0 : p.optInt("cap", 0);
             if (cap != shownCap) {
@@ -2538,6 +2596,21 @@ final class Screens {
             rb.setVisibility(GONE);
             bodiesRow = rb;
             game.addView(rb);
+            // a paused game keeps drawing the same picture at full speed: 30 fps until it runs again
+            LinearLayout rr = Ui.row(c);
+            rr.setMinimumHeight(t.dp(56));
+            LinearLayout rrText = Ui.col(c);
+            rrText.addView(Ui.text(c, t, "Rest while paused", 15, t.text, true));
+            rrText.addView(Ui.text(c, t, "30 fps until you unpause, to stay cool", 12.5f, t.text3, false), Ui.margins(Ui.lp(-2, -2), 0, t.dp(2), 0, 0));
+            rr.addView(rrText, Ui.weight(1));
+            restSwitch = switchView(c, t);
+            restSwitch.setOnCheckedChangeListener((v, on) -> {
+                if (v.getTag() == null) host.command("perfMode", Ui.args("rest", on), null);
+            });
+            rr.addView(restSwitch);
+            rr.setVisibility(GONE);
+            restRow = rr;
+            game.addView(rr);
             LinearLayout r0 = Ui.row(c);
             r0.setMinimumHeight(t.dp(52));
             r0.addView(Ui.text(c, t, "Frame rate", 15, t.text, true), Ui.weight(1));

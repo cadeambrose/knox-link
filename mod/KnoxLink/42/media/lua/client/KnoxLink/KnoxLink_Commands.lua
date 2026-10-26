@@ -37,8 +37,8 @@ end)
 
 -- The game's own "Lock Framerate" option (Core.setFramerate takes the option's position in the
 -- Display options list: 1 uncapped, 2 = 244 ... 6 = 120, 7 = 95, 8 = 90, 10 = 60).
-local FPS_INDEX = { [244] = 2, [240] = 3, [165] = 4, [144] = 5, [120] = 6, [95] = 7, [90] = 8, [75] = 9,
-    [60] = 10, [55] = 11, [45] = 12, [30] = 13, [24] = 14 }
+local FPS_INDEX = { [0] = 1, [244] = 2, [240] = 3, [165] = 4, [144] = 5, [120] = 6, [95] = 7, [90] = 8, [75] = 9,
+    [60] = 10, [55] = 11, [45] = 12, [30] = 13, [24] = 14 }   -- 0: uncapped
 
 -- Project Viewpoint takes the frame-rate option over while it runs (its own cap, kept in its settings).
 function KL.viewpointCaps()
@@ -46,6 +46,19 @@ function KL.viewpointCaps()
     if not caps then return nil end
     local ok, active = pcall(caps.active)
     return ok and active and caps or nil
+end
+
+--- The frame-rate cap now (0: uncapped), from Viewpoint when it has taken it over, else the game's option.
+function KL.frameCap()
+    local caps = KL.viewpointCaps()
+    if caps then
+        local ok, cap = pcall(caps.gameCap)
+        if ok and type(cap) == "number" and cap >= 0 then return cap end
+    end
+    local perf = getPerformance and getPerformance()
+    if not perf then return nil end
+    if KL.try(perf, "isFramerateUncapped", false) then return 0 end
+    return KL.try(perf, "getFramerate", nil)
 end
 
 --- Sets the frame-rate cap the way the game (or Viewpoint, when it has taken it over) keeps it.
@@ -64,7 +77,7 @@ end
 
 KL.addHandler("fps", function(player, a)
     local cap = tonumber(a.cap)
-    if not KL.setFrameCap(cap) then return false, "Unknown frame rate" end
+    if not cap or cap <= 0 or not KL.setFrameCap(cap) then return false, "Unknown frame rate" end
     -- picking a rate by hand is a custom mode, and it's the most the heat control goes up to
     if KL.perfChosen then KL.perfChosen(cap) end
     return true, cap .. " fps"

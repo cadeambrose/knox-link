@@ -395,6 +395,10 @@ button.tag.chip { cursor: pointer; }
 .pick-targets button { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 14px 9px 12px; border-radius: 12px; background: var(--surface-2); color: var(--text); font-weight: 700; }
 .pick-targets button .ico { width: 18px; height: 18px; color: var(--accent); }
 .pick-targets.idle button, .pick-targets.idle button .ico { color: var(--text-3); }
+.pick-targets.idle button .ii { opacity: .5; }
+.ii.flat.chip { width: 24px; height: 24px; }
+.ii.flat.head { width: 26px; height: 26px; }
+.ii.flat.head > .ico { width: 20px; height: 20px; }
 .item[data-worn] { opacity: .45; }
 
 /* ------------------------------------------------------------------ skills */

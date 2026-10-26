@@ -451,9 +451,9 @@ public final class DevMain {
                 m("id", 503.0, "n", "Shotgun", "t", "Base.Shotgun", "c", "Weapon", "ic", "Item_Firearm_PumpShotgun", "w", 4.0, "ammo", 2.0, "ammoMax", 6.0, "a", l("equip1")));
         List<Object> keys = l(m("id", 311.0, "n", "House Key", "t", "Base.Key1", "c", "Key", "ic", "Item_Key1", "w", 0.0, "a", l()));
         return m("containers", l(
-                m("id", 0.0, "n", "Inventory", "w", 7.4, "cap", 8.0, "items", main),
-                m("id", 300.0, "n", "School Bag", "w", 4.0, "cap", 18.0, "items", bag),
-                m("id", 310.0, "n", "Key Ring", "w", 0.1, "cap", 1.0, "ring", true, "items", keys)));
+                m("id", 0.0, "n", "Inventory", "ic", "Icon_InventoryBasic", "w", 7.4, "cap", 8.0, "items", main),
+                m("id", 300.0, "n", "School Bag", "ic", "Item_Bag_Schoolbag", "w", 4.0, "cap", 18.0, "items", bag),
+                m("id", 310.0, "n", "Key Ring", "ic", "Item_KeyRing", "w", 0.1, "cap", 1.0, "ring", true, "items", keys)));
     }
 
     /** What the character wears (inner layers first), their hotbar and every weapon they carry. */
