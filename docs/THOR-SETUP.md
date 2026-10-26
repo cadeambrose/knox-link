@@ -2,7 +2,8 @@
 
 This is how to run Project Zomboid (Build 42) natively on a dual-screen Android handheld such as the
 **AYN Thor** (Snapdragon 8 Gen 2), with Knox Link on the second screen, and optionally the 3D first/third
-person view of Project Viewpoint. It's what the Knox Link author's own Thor runs.
+person view of Project Viewpoint. It's the setup [@cadeambrose](https://github.com/cadeambrose) made Knox Link
+on and tests it with, on their own AYN Thor Max (Android 13, Project Zomboid 42.21, Zomdroid 1.5.2).
 
 > You need your own copy of Project Zomboid on Steam. Nothing here shares game files: you download the
 > game's Linux files from your own Steam account.

@@ -8,6 +8,10 @@ Knox Link is made of two Project Zomboid mods (a Lua mod and a small Java server
 clients: a native Android app (built for dual-screen handhelds such as the AYN Thor) and a web app
 that any browser on your network can open.
 
+**Made and tested on an AYN Thor Max**, with Project Zomboid running on the handheld itself (no PC, no
+streaming) on the top screen and Knox Link on the bottom one, in the game's normal view and in 3D. See
+[Tested on](#tested-on).
+
 > Not affiliated with The Indie Stone. Knox Link reads the game's own artwork from your copy of the
 > game while it runs; it doesn't ship any game files.
 
@@ -74,6 +78,25 @@ the numbers.
 | **Game on a PC, second screen on a phone/tablet/monitor** | Open the address the game shows (press **F8**, there's a QR code) in any browser on the same Wi-Fi, enter the PIN. Or install the Android app. |
 | **Game on a dual-screen Android handheld** (e.g. with Zomdroid) | Install the app; open it on the other screen. It connects to the game on the same device by itself. |
 | **Game streamed from a PC** (Moonlight, Artemis, Steam Link, Parsec) | Run the game on the PC with the mods. The app on the handheld finds the PC on your Wi-Fi; enter the PIN once. The app can open your streaming app on the other screen for you. |
+
+---
+
+## Tested on
+
+Knox Link is made and tested by [@cadeambrose](https://github.com/cadeambrose) on their own **AYN Thor Max**,
+with Project Zomboid running natively on the handheld (no PC, no streaming) and Knox Link on its second screen.
+
+| | |
+| --- | --- |
+| **Handheld** | AYN Thor Max (Snapdragon 8 Gen 2, Android 13): the game on the 1920×1080 top screen, Knox Link on the 1240×1080 bottom screen |
+| **Game** | Project Zomboid Build 42.21 (the game's Linux files from Steam) in [Zomdroid](https://github.com/udarmolota/zomdroid) 1.5.2, 4 GB Java heap |
+| **Mods** | ZombieBuddy 2.3.4, Knox Link and PZ Optimization; for 3D also Project Viewpoint (with Texture Fix and Stability Fix), Viewpoint on Android and 6277 3D models for Viewpoint |
+| **Normal view** | renderer MOBILEGLUES: 90 fps (the cap) at about 59 °C with PZ Optimization |
+| **3D view** (first and third person) | renderer ZINK_ZFA: about 40–50 fps, sometimes 60 or more, at 60–75 °C with the settings in the [Thor setup guide](docs/THOR-SETUP.md) |
+| **Second screen** | the Android app beside the game (every tab, the journal written by Claude too); the web app in a browser connected to the game on the Thor |
+
+Not tried yet: the game on a PC with a phone or tablet as the second screen, streaming setups, multiplayer and
+Build 41. If you try one, tell us how it went in [Issues](https://github.com/cadeambrose/knox-link/issues).
 
 ---
 
