@@ -63,13 +63,16 @@ end
 
 --- Sets the frame-rate cap the way the game (or Viewpoint, when it has taken it over) keeps it.
 function KL.setFrameCap(cap)
-    local idx = cap and FPS_INDEX[cap]
-    if not idx then return false end
+    cap = tonumber(cap)
+    if not cap or cap < 0 then return false end
     local caps = KL.viewpointCaps()
     if caps then
-        caps.setGameCap(cap)
-        return true
+        -- Viewpoint takes any rate (its list goes past the game's)
+        local ok = pcall(caps.setGameCap, math.floor(cap))
+        return ok
     end
+    local idx = FPS_INDEX[cap]
+    if not idx then return false end
     getCore():setFramerate(idx)
     pcall(function() getCore():saveOptions() end)
     return true

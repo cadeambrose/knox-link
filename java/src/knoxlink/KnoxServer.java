@@ -38,7 +38,7 @@ import java.util.zip.GZIPOutputStream;
  * send the PIN before they get anything.
  */
 final class KnoxServer {
-    static final String VERSION = "1.0.0";
+    static final String VERSION = "1.1.0";
 
     private static final KnoxServer INSTANCE = new KnoxServer();
 
@@ -263,8 +263,20 @@ final class KnoxServer {
 
     // ------------------------------------------------------------------ state from Lua
 
+    // The game reports some things (its clock, the character) four times a second; when nothing changed, the screens
+    // already have it, and every message wakes them up to redraw. The same message again goes out only this often,
+    // so they still know the game is there (they call it quiet after 4 seconds).
+    private static final long SAME_AGAIN_MS = 1500;
+    private final Map<String, Long> sentAt = new ConcurrentHashMap<>();
+
     void publish(String channel, String json) {
-        latest.put(channel, json);
+        String before = latest.put(channel, json);
+        long now = System.currentTimeMillis();
+        if (json.equals(before)) {
+            Long at = sentAt.get(channel);
+            if (at != null && now - at < SAME_AGAIN_MS) return;
+        }
+        sentAt.put(channel, now);
         String msg = "{\"t\":\"s\",\"c\":" + quote(channel) + ",\"d\":" + json + "}";
         for (Client c : clients) {
             if (c.authed && c.wants(channel)) c.offer(channel, msg);

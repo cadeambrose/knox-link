@@ -32,7 +32,7 @@ streaming) on the top screen and Knox Link on the bottom one, in the game's norm
 | --- | --- |
 | **Map** | The game's world map, drawn in the paper style of the in-game map, following you. Fog of war for places you haven't seen. Press and hold to set a waypoint (with an arrow in the game), draw a symbol or write a note on your map — it's the same map the game saves — or set your base. Teammates in multiplayer, as the server allows. |
 | **Vitals** | The game's health-panel body with every wound, moodles with the game's icons, quick actions (bandage, eat, drink, painkiller, light, weapon, rest — or sleep when a bed is near). Tap a hurt body part: what's wrong with it **in the game's own words** (scratched, laceration, deep wound, bitten, glass lodged, infected, dirty bandage, stitched…) and **every treatment the game's health panel offers there** — disinfect, bandage, stitch, remove glass or a bullet, splint, poultices — in treating order, only with what you actually have. Tap the body to flip to **your character, live in 3D**; drag to turn them, tap a part to see what's worn there and how well it protects. |
-| **Gear** | *On you:* what's in your hands, what you're wearing (and where), what you carry, and one section per bag; your hotbar (one tap to draw). Tap or hold an item for its sheet: quick actions, **Move to** any bag, a container around you or the floor, and **All actions…** — the game's own right-click menu for it. Select several items and move them at once. *Around you:* whatever the game's loot window shows, plus **every body within a few steps** with its loot (taking walks there first), and **the things around you** — doors, windows, curtains, light switches, furniture — each with the game's own menu (take down curtains, open a window, turn on a light…). *Craft:* only the recipes you can make right now, one tap to start. |
+| **Gear** | *On you:* what's in your hands, what you're wearing (and where), what you carry, and one section per bag; your hotbar (one tap to draw). Tap or hold an item for its sheet: quick actions, **Move to** any bag, a container around you or the floor, and **All actions…** — the game's own right-click menu for it. **Move items**: tap the items (or *All* for a whole bag or container), then where they go — any bag, your **key ring**, a container around you or the floor — and it stays on for the next batch; it works from *Around you* too, from a shelf or a body straight into your backpack. *Around you:* whatever the game's loot window shows, plus **every body within a few steps** with its loot (taking walks there first), and **the things around you** — doors, windows, curtains, light switches, furniture — each with the game's own menu (take down curtains, open a window, turn on a light…). *Craft:* only the recipes you can make right now, one tap to start. |
 | **Skills** | Every skill with the game's own level squares. |
 | **Radio** | What your character has heard on radios and TVs, kept across reloads, and the weather forecast from the Emergency Broadcast. In multiplayer: chat, with quick phrases. |
 | **Base** | Mark your base; while you're there it keeps an eye on generators, rain collectors and crops, and shows what you saw last time when you're away. |
@@ -48,8 +48,10 @@ first or third person. It fades the ones you lost track of, colours them by what
 coming for you, attacking) and buzzes when one is close behind you. Tap it for a bigger one and its settings.
 
 **Game card** (Settings): one-tap **Cool / Balanced / Smooth** modes, automatic **heat control** (the frame
-cap steps down while the chip is hot and back up once it cools), the frame rate, the device's temperatures and
-the survival guide on or off.
+cap steps down while the chip is hot and back up once it cools), **rest while paused** (30 fps until you
+unpause: about a quarter less power on the Thor, measured), **dead bodies in 3D** with Project Viewpoint (the
+nearest few, for about half a frame per second), the frame rate, the device's temperatures and the survival
+guide on or off.
 
 ### Made for dual-screen handhelds
 
@@ -59,6 +61,7 @@ the survival guide on or off.
   View button switches first and third person, and a save starts in 3D in the camera you used last.
 - **Shortcut keys** (game Options > Mods > Knox Link) for first/third person, bandage, eat, drink, light and best
   weapon — map a handheld's spare buttons to them.
+- Light on the device: the app uses 2–5 % of one CPU core on the Thor, and the game only sends what changed.
 - The [AYN Thor setup guide](docs/THOR-SETUP.md) covers running Project Zomboid on the handheld itself, with 3D.
 
 ### Immersion (on by default)
@@ -94,8 +97,9 @@ with Project Zomboid running natively on the handheld (no PC, no streaming) and 
 | **Normal view** | renderer MOBILEGLUES: 90 fps (the cap) at about 59 °C with PZ Optimization |
 | **3D view** (first and third person) | renderer ZINK_ZFA: about 40–50 fps, sometimes 60 or more, at 60–75 °C with the settings in the [Thor setup guide](docs/THOR-SETUP.md) |
 | **Second screen** | the Android app beside the game (every tab, the journal written by Claude too); the web app in a browser connected to the game on the Thor |
+| **PC** | the game on Windows 11 (ZombieBuddy + Knox Link), every tab of the web app in a browser on the same PC |
 
-Not tried yet: the game on a PC with a phone or tablet as the second screen, streaming setups, multiplayer and
+Not tried yet: a phone or tablet on Wi-Fi as the second screen of a PC game, streaming setups, multiplayer and
 Build 41. If you try one, tell us how it went in [Issues](https://github.com/cadeambrose/knox-link/issues).
 
 ---
@@ -103,7 +107,7 @@ Build 41. If you try one, tell us how it went in [Issues](https://github.com/cad
 ## Install
 
 1. Install **ZombieBuddy** (the framework that lets mods run Java code) and enable it.
-2. Download `KnoxLink-1.0.0.zip` from [Releases](https://github.com/cadeambrose/knox-link/releases) and copy
+2. Download the latest `KnoxLink-x.y.z.zip` from [Releases](https://github.com/cadeambrose/knox-link/releases) and copy
    its `KnoxLink` and `KnoxLinkServer` folders into your `Zomboid/mods` folder.
 3. Enable **Knox Link - Second Screen**, **Knox Link Server (Java)** and **ZombieBuddy** for your save.
 4. In the game, press **F8** for the address, PIN and QR code.

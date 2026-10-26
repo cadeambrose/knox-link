@@ -87,7 +87,16 @@ With these, the 3D view runs at about 40–50 fps in first/third person at 60–
 - **Knox Link > Settings > Game**: **Cool** (30 fps), **Balanced** (60) or **Smooth** (90), and
   **"Cool down automatically when hot"**: the frame cap steps down while the chip stays above 88 °C and back
   up once it's below 76 °C.
-- A higher fan curve in the handheld's settings helps (the author's: 100 % at 85 °C).
+- **"Rest while paused"** (on by default): a few seconds into a pause the game draws 30 frames a second instead
+  of up to 90, and goes back the moment you unpause. Measured in the 3D view: 6.2 W → 4.5 W while paused.
+- What the power goes into, measured on the Thor in the 3D view (USB power with a full battery): the frame rate
+  is the big lever (about 0.08 W per frame per second). A cap above what the game reaches (90 when the 3D view
+  makes ~50) costs nothing extra. Knox Link's app uses 2–5 % of one CPU core.
+- The Thor's **High Performance** mode gave the most frames for its power in 3D: 51 fps, against 48 in
+  Performance and 38 in Standard (which saved about half a watt).
+- The fan: the curve in the handheld's settings decides how loud it gets. A steeper one (the author's: 100 %
+  at 85 °C) keeps the chip cooler; a gentler one is quieter and lets the chip run warmer, which it is made for
+  (it slows itself down only near 95 °C).
 
 ## Troubleshooting
 

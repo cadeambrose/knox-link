@@ -115,6 +115,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     private boolean authed, socketUp;
     private JSONObject core, gearData, bodyData, skillsData;
     private long lastCoreAt;
+    private String coreSig = "";
     private int nextCmd = 1;
     private final Map<Integer, String> pending = new HashMap<>();
     private boolean mapLoading;
@@ -571,6 +572,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         lootData = craftData = journalData = radarData = null;
         if (radar != null) radar.update(null);
         lastCoreAt = 0;
+        coreSig = "";
         lastChatN = -1;
         moodleLevels.clear();
         moodlesPrimed = false;
@@ -1776,12 +1778,17 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     private void onState(String channel, JSONObject d) {
         if (d == null) return;
         switch (channel) {
-            case "core":
-                core = d;
+            case "core": {
                 lastCoreAt = System.currentTimeMillis();
                 if (authed) hideOverlay();
+                // the game saying it's still there with nothing new: no redraw (this screen draws on the CPU)
+                String sig = d.toString();
+                if (sig.equals(coreSig)) break;
+                coreSig = sig;
+                core = d;
                 onCore(d);
                 break;
+            }
             case "body":
                 bodyData = d;
                 vitals.body(d);

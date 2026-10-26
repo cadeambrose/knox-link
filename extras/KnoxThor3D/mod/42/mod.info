@@ -8,3 +8,5 @@ modversion=0.1
 javaJarFile=media/java/client/KnoxThor3D.jar
 javaPkgName=knoxthor3d
 url=https://github.com/cadeambrose/knox-link
+icon=icon.png
+poster=poster.png

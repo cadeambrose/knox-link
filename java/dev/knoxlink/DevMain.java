@@ -19,7 +19,7 @@ public final class DevMain {
     // the body part a screen has open (its treatments go out with "body"), the radar's range, Settings > Game
     static int healthPart = -1, radarRange = 20, fpsCap = 60;
     static String perfMode = "balanced";
-    static boolean perfAuto = true, guideOn = false, bodiesOn = false;
+    static boolean perfAuto = true, guideOn = false, bodiesOn = false, restOn = true;
 
     @SuppressWarnings("unchecked")
     public static void main(String[] args) throws Exception {
@@ -156,6 +156,7 @@ public final class DevMain {
                         }
                         if (c.args.get("auto") != null) perfAuto = Boolean.TRUE.equals(c.args.get("auto"));
                         if (c.args.get("bodies") != null) bodiesOn = Boolean.TRUE.equals(c.args.get("bodies"));
+                        if (c.args.get("rest") != null) restOn = Boolean.TRUE.equals(c.args.get("rest"));
                         msg = null;
                         break;
                     case "fps":
@@ -343,7 +344,7 @@ public final class DevMain {
         core.put("can", m("bandage", true, "eat", true, "drink", false, "pills", true));
         // the frame-rate cap, the mode and heat control, the device's temperatures
         Map<String, Object> perf = m("cap", (double) fpsCap, "cpu", 71.5 + Math.sin(t / 8) * 4, "gpu", 62.0, "bat", 34.0,
-                "guide", guideOn, "mode", perfMode, "auto", perfAuto, "bodies", bodiesOn);
+                "guide", guideOn, "mode", perfMode, "auto", perfAuto, "bodies", bodiesOn, "rest", restOn);
         if (perfAuto && ((int) (t / 15)) % 2 == 1) perf.put("held", (double) Math.max(30, fpsCap - 15));
         core.put("perf", perf);
         if (imm) {

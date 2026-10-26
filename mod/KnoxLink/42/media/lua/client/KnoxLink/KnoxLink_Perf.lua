@@ -32,7 +32,8 @@ local function settings()
     return md
 end
 
-local held = nil   -- the cap the heat control holds the game at now (nil: the mode's own)
+local held = nil      -- the cap the heat control holds the game at now (nil: the mode's own)
+local applied = nil   -- the cap this last gave the game: another one there was picked elsewhere (game options)
 
 local function modeCap(s)
     local m = MODES[s.mode]
@@ -81,7 +82,7 @@ function KL.applyPerfMode(mode)
     if not m then return false end
     local s = settings()
     s.mode, held = mode, nil
-    KL.setFrameCap(m.cap)
+    if KL.setFrameCap(m.cap) then applied = m.cap end
     if KnoxLink_viewpointSetting and KL.viewState and KL.viewState() then
         KnoxLink_viewpointSetting("lod.packRing", tostring(m.ring))
     end
@@ -91,7 +92,7 @@ end
 --- A rate picked by hand: a custom mode, and the most the heat control goes back up to.
 function KL.perfChosen(cap)
     local s = settings()
-    s.mode, s.cap, held = "custom", cap, nil
+    s.mode, s.cap, held, applied = "custom", cap, nil, cap
 end
 
 --- For screens: { mode = "cool"|"balanced"|"smooth"|"custom", auto = bool, held = cap the heat control holds or nil,
@@ -161,8 +162,9 @@ Events.OnTickEvenPaused.Add(function()
                 writeRest(cap)
             end
         end
-    elseif not paused then
-        pausedAt = nil
+    else
+        -- running again, or resting switched off during the pause: the rate from before
+        if not paused then pausedAt = nil end
         if restFrom then
             local back = restFrom
             restFrom = nil
@@ -173,15 +175,55 @@ Events.OnTickEvenPaused.Add(function()
     end
 end)
 
--- ----------------------------------------------------------------------------- the heat control
+-- ----------------------------------------------------------------------------- the cap the game runs at
 
+-- The game gets the mode's cap (or the one picked by hand, in Knox Link, the game's options or Viewpoint's
+-- window), lowered while the chip is hot (the heat control).
 local ema, hotSince, coolSince, nextAt, startAt = nil, nil, nil, 0, nil
+
+local function effectiveCap(s)
+    local cap = modeCap(s)
+    if held and held < cap then cap = held end
+    return cap
+end
+
+local function updateHeat(s, now)
+    if not s.auto or not KnoxLink_device then
+        held = nil
+        return
+    end
+    local ok, d = pcall(KnoxLink_device)
+    local temp = ok and d and tonumber(d.cpu)
+    if not temp then return end
+    ema = ema and (ema * 0.8 + temp * 0.2) or temp   -- about the last ten seconds
+    local most = modeCap(s)
+    if ema >= HOT then
+        coolSince = nil
+        hotSince = hotSince or now
+        local cap = effectiveCap(s)
+        if now - hotSince >= HOT_FOR and cap > STEPS[1] then
+            hotSince = now
+            held = stepDown(cap)
+        end
+    elseif ema <= COOL and held then
+        hotSince = nil
+        coolSince = coolSince or now
+        if now - coolSince >= COOL_FOR then
+            coolSince = now
+            local up = stepUp(held, most)
+            held = (up < most) and up or nil
+        end
+    else
+        hotSince, coolSince = nil, nil
+    end
+end
 
 Events.OnGameStart.Add(function()
     startAt = getTimestampMs() + 6000   -- the world's mode again, once Viewpoint has started
-    ema, hotSince, coolSince, held = nil, nil, nil, nil
+    ema, hotSince, coolSince, held, applied = nil, nil, nil, nil, nil
 end)
 
+-- (OnTick doesn't run while the game is paused: the resting rate is left alone)
 Events.OnTick.Add(function()
     local now = getTimestampMs()
     if now < nextAt then return end
@@ -198,30 +240,22 @@ Events.OnTick.Add(function()
         if MODES[s.mode] then KL.applyPerfMode(s.mode) end
         if s.bodies ~= nil then KL.applyBodies(s.bodies) end   -- only once chosen: Viewpoint's own setting otherwise
     end
-    if not s.auto or not KnoxLink_device then return end
-    local ok, d = pcall(KnoxLink_device)
-    local temp = ok and d and tonumber(d.cpu)
-    if not temp then return end
-    ema = ema and (ema * 0.8 + temp * 0.2) or temp   -- about the last ten seconds
-    local most = modeCap(s)
-    local cap = held or most
-    if ema >= HOT then
-        coolSince = nil
-        hotSince = hotSince or now
-        if now - hotSince >= HOT_FOR and cap > STEPS[1] then
-            hotSince = now
-            cap = stepDown(cap)
-            if KL.setFrameCap(cap) then held = cap end
-        end
-    elseif ema <= COOL and cap < most then
-        hotSince = nil
-        coolSince = coolSince or now
-        if now - coolSince >= COOL_FOR then
-            coolSince = now
-            cap = stepUp(cap, most)
-            if KL.setFrameCap(cap) then held = (cap < most) and cap or nil end
-        end
-    else
-        hotSince, coolSince = nil, nil
+    if restFrom then return end
+    local cur = KL.frameCap()
+    if not cur or cur <= 0 then return end   -- uncapped: nothing to cool
+    if applied == nil then
+        -- a world without a chosen rate takes the one the game has
+        if s.mode == "custom" and not s.cap then s.cap = cur end
+        applied = cur
+    elseif cur ~= applied then
+        -- picked elsewhere (the game's options, Viewpoint's window): that's the rate chosen now
+        s.mode, s.cap, held = "custom", cur, nil
+        applied = cur
+    end
+    updateHeat(s, now)
+    local want = effectiveCap(s)
+    if want ~= cur and KL.setFrameCap(want) then
+        applied = want
+        KL.refresh("core")
     end
 end)
