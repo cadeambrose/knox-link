@@ -39,6 +39,10 @@ streaming) on the top screen and Knox Link on the bottom one, in the game's norm
 | **Journal** | A diary that writes itself **in your character's voice**: their day, from what happened (kills, skills, wounds, places, sleep, the weather, how they felt), in the tone of their job and traits — plus your own notes. Free and offline by default; optionally written by an AI you choose (Claude, OpenAI, Gemini, OpenRouter, or any OpenAI-compatible server, even a local model on your PC), with a backstory written once so the voice stays the same. Your key stays on your device. |
 | **Car** | Appears when you drive: the game's dashboard with live needles and warning lights, the mechanics overlay, and engine/lights/heater/horn controls. |
 
+*Move items: tap the items (or All), then where they go; here, everything on a body straight into the inventory:*
+
+![Move items, step by step](docs/screens/move-items.gif)
+
 **Alerts** pop up across every tab (bleeding, getting hungry or thirsty, arriving at a waypoint, low fuel,
 chat) with a one-tap fix when you have what it takes, and vibrate if the device can.
 
