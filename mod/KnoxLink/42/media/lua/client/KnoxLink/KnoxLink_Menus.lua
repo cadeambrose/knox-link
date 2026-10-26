@@ -320,7 +320,7 @@ KL.addHandler("move", function(player, a)
         dest = KL.nearContainer and KL.nearContainer(player, to) or nil
     end
     if not dest then return false, "That place isn't there anymore" end
-    local moved, name, why = 0, nil, nil
+    local moved, name, same, why = 0, nil, true, nil
     for _, id in ipairs(ids) do
         local item = KL.findItem(player, id) or (KL.findAround and KL.findAround(player, id))
         local src = item and item:getContainer()
@@ -342,10 +342,14 @@ KL.addHandler("move", function(player, a)
                 if KL.walkToContainer then KL.walkToContainer(player, src) ; KL.walkToContainer(player, dest) end
                 ISTimedActionQueue.add(ISInventoryTransferUtil.newInventoryTransferAction(player, item, src, dest))
                 moved = moved + 1
-                name = name or item:getDisplayName()
+                local n = item:getDisplayName()
+                if name and n ~= name then same = false end
+                name = name or n
             end
         end
     end
     if moved == 0 then return false, why or "Nothing to move" end
-    return true, moved > 1 and (name .. " x" .. moved) or name
+    if moved == 1 then return true, name end
+    -- "Nails ×24" for a stack, "9 items" for different things
+    return true, same and (name .. " ×" .. moved) or (moved .. " items")
 end)

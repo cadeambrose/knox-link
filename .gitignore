@@ -7,3 +7,6 @@ dist/
 # local notes and device-specific dev scripts
 LOG.md
 extras/dev-tools/
+
+# drafts of posts, reviewed before anything is shared
+sharing/
