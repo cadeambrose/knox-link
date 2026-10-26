@@ -47,7 +47,7 @@ Not affiliated with The Indie Stone. Knox Link reads the game's artwork from you
 '@
 $lines = @('version=1', 'title=Knox Link - Second Screen')
 foreach ($l in ($description -split "`r?`n")) { $lines += "description=$l" }
-$lines += 'tags=Build 42;Interface;Multiplayer;Misc'
+$lines += 'tags=Build 42;Interface;QoL;Multiplayer'
 $lines += "visibility=$Visibility"
 [IO.File]::WriteAllLines("$stage\workshop.txt", [string[]]$lines, (New-Object Text.UTF8Encoding $false))
 "staged $stage ($Visibility)"
