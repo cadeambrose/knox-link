@@ -34,6 +34,7 @@ streaming) on the top screen and Knox Link on the bottom one, in the game's norm
 | **Where did I see…?** | The map's search: Knox Link remembers every container your character looked in, as you go — shelves, fridges, bodies, car trunks, the floor. Ask for "hammer" or tap *Medicine*, and get what you saw, nearest first: in which container, which room, which town, how long ago; tap one to see it on the map. Only what this character saw: a new character remembers nothing. |
 | **Vitals** | The game's health-panel body with every wound, moodles with the game's icons, quick actions (bandage, eat, drink, painkiller, light, weapon, rest — or sleep when a bed is near). Tap a hurt body part: what's wrong with it **in the game's own words** (scratched, laceration, deep wound, bitten, glass lodged, infected, dirty bandage, stitched…) and **every treatment the game's health panel offers there** — disinfect, bandage, stitch, remove glass or a bullet, splint, poultices — in treating order, only with what you actually have. Tap the body to flip to **your character, live in 3D**; drag to turn them, tap a part to see what's worn there and how well it protects. |
 | **Gear** | *On you:* what's in your hands, what you're wearing (and where), what you carry, and one section per bag; your hotbar (one tap to draw). Tap or hold an item for its sheet: quick actions, **Move to** any bag, a container around you or the floor, and **All actions…** — the game's own right-click menu for it. **Move items**: tap the items (or *All* for a whole bag or container), then where they go — any bag, your **key ring**, a container around you or the floor — and it stays on for the next batch; it works from *Around you* too, from a shelf or a body straight into your backpack. *Around you:* whatever the game's loot window shows, plus **every body within a few steps** with its loot (taking walks there first), and **the things around you** — doors, windows, curtains, light switches, furniture — each with the game's own menu (take down curtains, open a window, turn on a light…). *Craft:* only the recipes you can make right now, one tap to start. |
+| **Weapons** | Your loadout, like a shooter's: every gun, melee weapon and throwable you carry, and the ones you've seen around. Open a gun for **the gunsmith** — the gun in the middle, its slots around it (optic, barrel, recoil pad, sling) — and pick a part: you see **every stat change before you attach it** (range, aiming, recoil, reload, sight, weight; better in green, worse in red), then Attach, Swap or Take off, done the game's own way (with a screwdriver where the game asks for one). A part you saw but don't have says where it is. Melee weapons show damage, speed, how many they hit and how fast they wear. |
 | **Skills** | Every skill with the game's own level squares. |
 | **Radio** | What your character has heard on radios and TVs, kept across reloads, and the weather forecast from the Emergency Broadcast. In multiplayer: chat, with quick phrases. |
 | **Base** | Mark your base; while you're there it keeps an eye on generators, rain collectors and crops, and shows what you saw last time when you're away. |
@@ -41,6 +42,10 @@ streaming) on the top screen and Knox Link on the bottom one, in the game's norm
 | **When you die** | Your journal becomes **a diary on your body**, in your character's words — readable in the game, and page by page on the second screen with their photos. Your next survivor can find it and read it. The second screen shows **the run's recap**: how long you lasted, how it ended, kills, how far you walked and the way you went, your best skills, the big moments and your last photo, saved as a picture if you like. |
 | **Ask** | Questions about the game, answered by the AI you set up for the journal, with your situation in mind: what you carry and what's within reach, your wounds, skills, where you are, the weather. "How do I treat this?", "What can I make with what I have?" One request per question, nothing sent until you ask. |
 | **Car** | Appears when you drive: the game's dashboard with live needles and warning lights, the mechanics overlay, and engine/lights/heater/horn controls. |
+
+**It looks like the game**: the game's own panels, buttons, tabs, tick boxes and colours, its fonts (Noto Sans,
+and Caveat for the handwriting) and its own art for every tab, read from your copy of the game. Prefer
+something else? Settings has a black *Midnight* theme and a *Light* one.
 
 *Move items: tap the items (or All), then where they go; here, everything on a body straight into the inventory:*
 
@@ -102,7 +107,7 @@ with Project Zomboid running natively on the handheld (no PC, no streaming) and 
 | **Game** | Project Zomboid Build 42.21 (the game's Linux files from Steam) in [Zomdroid](https://github.com/udarmolota/zomdroid) 1.5.2, 4 GB Java heap |
 | **Mods** | ZombieBuddy 2.3.4, Knox Link and PZ Optimization; for 3D also Project Viewpoint (with Texture Fix and Stability Fix), Viewpoint on Android and 6277 3D models for Viewpoint |
 | **Normal view** | renderer MOBILEGLUES: 90 fps (the cap) at about 59 °C with PZ Optimization |
-| **3D view** (first and third person) | renderer ZINK_ZFA: about 40–50 fps, sometimes 60 or more, at 60–75 °C with the settings in the [Thor setup guide](docs/THOR-SETUP.md) |
+| **3D view** (first and third person) | renderer ZINK_ZFA with the DD-Turnip driver and Viewpoint on Android 0.3: **60 fps held** (the cap) in a house, standing and walking, at about 8.5 W, with the settings in the [Thor setup guide](docs/THOR-SETUP.md) |
 | **Second screen** | the Android app beside the game (every tab, the journal written by Claude too); the web app in a browser connected to the game on the Thor |
 | **PC** | the game on Windows 11 (ZombieBuddy + Knox Link), every tab of the web app in a browser on the same PC |
 
@@ -149,12 +154,13 @@ The build is reproducible: the same sources give the same jar, byte for byte.
 
 ```
 mod/KnoxLink/          Lua mod: what the screens see (State, Outfit, Comms, Map, Base, Loot, Craft, Journal,
-                       Memory, Photo, Legacy, Ask) and what they can do (Commands, Quick); mod options and the F8 panel
+                       Memory, Photo, Legacy, Ask, Weapons) and what they can do (Commands, Quick); mod options
+                       and the F8 panel
 mod/KnoxLinkServer/    the Java add-on (built from java/src): HTTP + WebSocket + raw TCP server,
                        map converter, fog of war, game art, map marks, the live character picture,
                        the floor plan, the character's memory, the scrapbook's photos
-android/               native Android app (Java, Android framework only, no libraries)
-web/                   web app (vanilla JS, no build step)
+android/               native Android app (Java, Android framework only, no libraries; the fonts in assets/)
+web/                   web app (vanilla JS, no build step; the fonts in fonts/)
 java/dev/              dev server with fake data
 tools/                 icon converter (web icons -> Android vector drawables)
 extras/KnoxThor3D/     "Viewpoint on Android": Project Viewpoint's 3D view on Zomdroid

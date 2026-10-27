@@ -2768,7 +2768,12 @@ final class Screens {
             close.setOnClickListener(v -> changed.closeApp());
             col.addView(close, Ui.margins(Ui.lp(-1, -2), 0, t.dp(12), 0, 0));
 
-            TextView about =Ui.text(c, t, "Knox Link 1.0.0 · open source · artwork is read from your own copy of Project Zomboid · not affiliated with The Indie Stone", 12, t.text3, false);
+            String version = "";
+            try {
+                version = " " + c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
+            } catch (Exception ignored) {
+            }
+            TextView about = Ui.text(c, t, "Knox Link" + version + " · open source · artwork is read from your own copy of Project Zomboid · not affiliated with The Indie Stone", 12, t.text3, false);
             about.setGravity(Gravity.CENTER);
             col.addView(about, Ui.margins(Ui.lp(-1, -2), t.dp(8), t.dp(16), t.dp(8), 0));
         }

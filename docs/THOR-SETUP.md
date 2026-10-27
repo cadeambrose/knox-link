@@ -78,9 +78,8 @@ Project Viewpoint's renderer needs desktop OpenGL 4.5, which only some of Zomdro
    - **Environment variables** (instance settings > Advanced):
      `TU_DEBUG=sysmem KNOXTHOR3D_RENDER_SCALE=75 KNOXTHOR3D_HASH=2 KNOXTHOR3D_SKY=all`. `TU_DEBUG=sysmem`
      draws straight to memory instead of in tiles (Viewpoint's passes are heavy on geometry, and tiling sorts
-     all of it first). The others are KnoxThor3D's (from this repository's `extras/KnoxThor3D`, newer than
-     the 1.1.0 download): the 3D view is drawn at 75 % and rebuilt to full size by Viewpoint's TAA+, and the
-     world's chunks are left out of Viewpoint's translucent pass, which sent them all through the GPU a second
+     all of it first). The others are KnoxThor3D's (0.3, in the release downloads from 1.2.0 on): the 3D
+     view is drawn at 75 % and rebuilt to full size by Viewpoint's TAA+, and the world's chunks are left out of Viewpoint's translucent pass, which sent them all through the GPU a second
      time for their glass and soft edges (about 4 ms a frame). Window panes are then dithered into the main
      pass (they look a little grainy); `KNOXTHOR3D_HASH=1` drops the panes for clear glass, `0` is Viewpoint's
      own. `KNOXTHOR3D_SKY` is step 6.
@@ -116,7 +115,7 @@ With these, the 3D view runs at about 40–50 fps in first/third person at 60–
    (`clouds sun moon stars`) or take some out (`all -meteors -night`); `aurora` adds northern lights. The sky
    is only drawn where it shows. Measured on the Thor: about 5 % more GPU time (0.8 ms a frame), and no
    change in power that could be told apart from run-to-run noise.
-7. **Frame generation** (Knox Link > Settings > Game, newer than 1.1.0): Viewpoint's own frame generation,
+7. **Frame generation** (Knox Link > Settings > Game, from 1.2.0 on): Viewpoint's own frame generation,
    made to run on the Thor by KnoxThor3D. About 90 frames shown from about 55 drawn, with a little smearing at moving edges.
    Off by default.
 

@@ -2,7 +2,7 @@
 #   <mod>\mod.info + media\   Build 41 (reads the mod root)
 #   <mod>\42\ + common\       Build 42 (reads the versioned folder)
 # Run .\build.ps1 first (it builds the server jar into mod\KnoxLinkServer\42\media\java).
-param([string]$Version = '1.1.0')
+param([string]$Version = '1.2.0')
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $dist = Join-Path $Root 'dist'

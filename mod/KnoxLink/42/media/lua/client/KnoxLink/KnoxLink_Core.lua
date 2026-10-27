@@ -12,7 +12,7 @@
 KnoxLink = KnoxLink or {}
 local KL = KnoxLink
 
-KL.VERSION = "1.1.0"
+KL.VERSION = "1.2.0"
 KL.collectors = KL.collectors or {}
 KL.handlers = KL.handlers or {}
 
