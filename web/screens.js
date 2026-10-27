@@ -140,7 +140,7 @@ const GameMenu = {
     const head = this.stack.length > 1
       ? `<button class="gm-back" data-act="back">${icon('chevron')}<span>${esc(lvl.title)}</span></button>`
       : `<h3 class="gm-title">${esc(lvl.title)}</h3>`;
-    openSheet(head + (rows ? `<div class="acts">${rows}</div>` : '<p class="none">Nothing to do with it right now.</p>'), (name, b) => {
+    openSheet(head + (rows ? `<div class="acts gm-list">${rows}</div>` : '<p class="none">Nothing to do with it right now.</p>'), (name, b) => {
       if (name === 'back') { this.stack.pop(); this.show(); return; }
       const i = Number(b.dataset.i);
       const e = lvl.opts[i];
@@ -1142,10 +1142,11 @@ const Skills = {
       const lvl = s.lvl || 0, p = s.p || 0;
       const zero = lvl === 0 && !p;
       let sq = '';
-      // the game's own skill squares: filled up to the level, partly filled for progress
+      // the game's own skill squares: filled up to the level, the one being earned partly filled for progress
       for (let i = 0; i < 10; i++) {
         if (i < lvl) sq += '<i class="on"></i>';
-        else if (i === lvl && lvl < 10 && p > 0) sq += `<i class="part" style="--p:${(p * 100).toFixed(1)}%"></i>`;
+        else if (i === lvl && lvl < 10 && p > 0) sq += `<i class="now part" style="--p:${(p * 100).toFixed(1)}%"></i>`;
+        else if (i === lvl && lvl < 10) sq += '<i class="now"></i>';
         else sq += '<i></i>';
       }
       return `<div class="skill${zero ? ' zero' : ''}"><div class="s-row"><span class="s-name">${esc(s.n)}</span>

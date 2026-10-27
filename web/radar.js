@@ -284,6 +284,7 @@ const Radar = (() => {
     pal = {
       bg: v('--bg', '#0d0f12'), text: v('--text', '#eceef1'), text2: v('--text-2', '#a7aeb8'), text3: v('--text-3', '#6f7782'),
       line: v('--line', '#2a3039'), warn: v('--warn', '#f2a93b'), bad: v('--bad', '#ef5d5d'), light: key === 'light',
+      font: (cs.getPropertyValue('--font') || '').trim() || 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
     };
     palKey = key;
     return pal;
@@ -400,7 +401,7 @@ const Radar = (() => {
     g.closePath();
     g.fill();
     g.lineWidth = Math.max(1 / dpr, v.big ? 1 : 0.8);
-    g.font = '600 11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+    g.font = '600 11px ' + P.font;
     g.textAlign = 'center';
     g.textBaseline = 'alphabetic';
     const ringLabel = (x, bottom, s) => { g.fillStyle = rgba(P.text3, 0.9); g.fillText(s, x, bottom - 4); };

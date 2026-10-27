@@ -229,6 +229,102 @@ const KnoxArt = (() => {
     return p;
   }
 
+  // ------------------------------------------------------------------ stickers (the tabs' icons)
+
+  // the offsets within reach of a sticker's outline and rim, nearest first
+  const REACH = 11;
+  const OFFS = (() => {
+    const l = [];
+    for (let dy = -REACH; dy <= REACH; dy++) {
+      for (let dx = -REACH; dx <= REACH; dx++) if (dx * dx + dy * dy <= REACH * REACH) l.push([dx, dy, dx * dx + dy * dy]);
+    }
+    l.sort((a, b) => a[2] - b[2]);
+    return { x: Int8Array.from(l, (o) => o[0]), y: Int8Array.from(l, (o) => o[1]), d: Float32Array.from(l, (o) => Math.sqrt(o[2])) };
+  })();
+
+  /**
+   * One of the game's pictures made into a sticker like the game's own sidebar icons: the picture (grown
+   * without smoothing when it is small pixel art) on a square 20 px wider than it, a 7 px white outline, a dark
+   * rim; in its own colours (on) or grey (off). The same as the Android app's ArtCache.sticker.
+   */
+  function stickerCanvas(src, on) {
+    const w = src.width, h = src.height, longer = Math.max(w, h);
+    const small = longer <= 48;
+    const k = small ? Math.max(1, Math.floor(100 / longer)) : 100 / longer;
+    const fw = small ? w * k : Math.max(1, Math.round(w * k)), fh = small ? h * k : Math.max(1, Math.round(h * k));
+    const fit = document.createElement('canvas');
+    fit.width = fw; fit.height = fh;
+    const fg = fit.getContext('2d', { willReadFrequently: true });
+    fg.imageSmoothingEnabled = !small;
+    fg.imageSmoothingQuality = 'high';
+    fg.drawImage(src, 0, 0, fw, fh);
+    const inp = fg.getImageData(0, 0, fw, fh).data;
+    const size = Math.max(fw, fh) + 20, ox = Math.floor((size - fw) / 2), oy = Math.floor((size - fh) / 2);
+    const px = new Uint8ClampedArray(size * size * 4), shape = new Uint8Array(size * size);
+    for (let y = 0; y < fh; y++) {
+      for (let x = 0; x < fw; x++) {
+        const s = (y * fw + x) * 4, i = (y + oy) * size + x + ox;
+        px[i * 4] = inp[s]; px[i * 4 + 1] = inp[s + 1]; px[i * 4 + 2] = inp[s + 2];
+        shape[i] = inp[s + 3] >= 128 ? 1 : 0;
+      }
+    }
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+    const out = g.createImageData(size, size), o = out.data, n = OFFS.d.length;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = y * size + x, j = i * 4;
+        if (shape[i]) {
+          if (on) {
+            o[j] = px[j]; o[j + 1] = px[j + 1]; o[j + 2] = px[j + 2];
+          } else {
+            const lum = (0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]) / 255;
+            o[j] = o[j + 1] = o[j + 2] = Math.round((0.30 + 0.62 * lum) * 255);
+          }
+          o[j + 3] = 255;
+          continue;
+        }
+        // the distance to the picture: the first offset that lands on it
+        let d = -1;
+        for (let q = 0; q < n; q++) {
+          const xx = x + OFFS.x[q], yy = y + OFFS.y[q];
+          if (xx >= 0 && yy >= 0 && xx < size && yy < size && shape[yy * size + xx]) { d = OFFS.d[q]; break; }
+        }
+        if (d < 0) continue;
+        // white to 7 px, a soft step into the rim, the rim (black at 55 %) to 9.5 px, then fading out
+        let a, white;
+        if (d <= 7) { a = 1; white = 1; }
+        else if (d <= 8) { const t = d - 7; a = 1 - 0.45 * t; white = (1 - t) / a; }
+        else if (d <= 9.5) { a = 0.55; white = 0; }
+        else { a = Math.max(0, 0.55 * (1 - (d - 9.5))); white = 0; }
+        o[j] = o[j + 1] = o[j + 2] = Math.round(white * 255);
+        o[j + 3] = Math.round(a * 255);
+      }
+    }
+    g.putImageData(out, 0, 0);
+    return c;
+  }
+
+  const stickers = new Map();   // "0:name" / "1:name" -> Promise<blob url|null>
+  /** A sticker's picture (a blob url): name is a texture in the packs ("Item_Book") or a loose file ("ui/emotes/shrug.png"). */
+  function sticker(name, on) {
+    const key = (on ? '1:' : '0:') + name;
+    let p = stickers.get(key);
+    if (!p) {
+      p = (async () => {
+        let src = null;
+        if (name.startsWith('ui/')) { const img = await media(name); if (img) src = imageCanvas(img); }
+        else src = await iconCanvas(name);
+        if (!src) { stickers.delete(key); return null; }   // not there (yet): the next connection tries again
+        const c = stickerCanvas(src, on);
+        return new Promise((res) => c.toBlob((b) => res(b ? URL.createObjectURL(b) : null)));
+      })();
+      stickers.set(key, p);
+    }
+    return p;
+  }
+
   /** Forget the pictures that failed, so the next connection tries them again. */
   function retry() {
     for (const [k, p] of images) p.then((v) => { if (!v) images.delete(k); });
@@ -237,7 +333,7 @@ const KnoxArt = (() => {
     indexP = null;
   }
 
-  return { media, mediaUrl, iconCanvas, iconUrl, iconNow: (tex) => urls.get(tex) || null, iconColor, fill, tint, alpha, retry };
+  return { media, mediaUrl, iconCanvas, iconUrl, iconNow: (tex) => urls.get(tex) || null, iconColor, fill, tint, alpha, sticker, retry };
 })();
 
 // =================================================================== the digital watch

@@ -79,8 +79,7 @@ final class RadarSheet {
         r0.setMinimumHeight(t.dp(52));
         r0.addView(Ui.text(c, t, "Range", 15, t.text, true), Ui.weight(1));
         LinearLayout seg = Ui.row(c);
-        seg.setBackground(t.round(t.surface3, 12));
-        seg.setPadding(t.dp(4), t.dp(4), t.dp(4), t.dp(4));
+        t.segBox(seg, t.surface3);
         int cur = model.range();
         for (int range : RadarView.RANGES) {
             TextView b = Ui.text(c, t, label(range), 14, t.text2, true);
@@ -115,7 +114,7 @@ final class RadarSheet {
             TextView x = (TextView) seg.getChildAt(i);
             boolean on = x == chosen;
             x.setTextColor(on ? t.text : t.text2);
-            x.setBackground(on ? t.round(t.isLight() ? 0xFFFFFFFF : t.surface, 9) : null);
+            x.setBackground(t.seg(on));
         }
     }
 
@@ -132,6 +131,7 @@ final class RadarSheet {
         int[][] states = {{android.R.attr.state_checked}, {}};
         s.setThumbTintList(new ColorStateList(states, new int[]{0xFFFFFFFF, 0xFFFFFFFF}));
         s.setTrackTintList(new ColorStateList(states, new int[]{t.accent, t.line}));
+        Ui.tickBox(t, s);
         s.setChecked(host.prefs().getBoolean(key, def));
         s.setOnCheckedChangeListener((v, on) -> {
             host.prefs().edit().putBoolean(key, on).apply();

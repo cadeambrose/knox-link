@@ -1,16 +1,16 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" class="pz">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, interactive-widget=resizes-content">
-<meta name="theme-color" content="#15181d">
+<meta name="theme-color" content="#050505">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Knox Link</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="app.css?v=20261027w">
+<link rel="stylesheet" href="app.css?v=20261027pz">
 </head>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
@@ -90,7 +90,7 @@
   <header class="topbar">
     <canvas class="watch" id="watch" role="img" aria-label="Watch"></canvas>
     <button class="info" id="info" aria-label="Weather and forecast">
-      <svg class="ico" id="wxIcon" aria-hidden="true"><use href="#i-sun"/></svg>
+      <svg class="ico" id="wxIcon" aria-hidden="true"><use href="#i-sun"/></svg><img class="wx-art" id="wxArt" alt="">
       <span class="info-col"><b id="infoTop">Knox Link</b><span id="infoSub">Waiting for the game</span></span>
     </button>
     <button class="radar-btn" id="radarBtn" aria-label="Danger radar" title="Danger radar"><canvas id="radarCanvas" aria-hidden="true"></canvas></button>
@@ -276,7 +276,7 @@
         </div>
         <div class="card">
           <div class="card-head"><h2>Display</h2></div>
-          <div class="set-row"><span>Theme</span><div class="seg" data-set="theme"><button data-v="dark">Dark</button><button data-v="oled">Midnight</button><button data-v="light">Light</button></div></div>
+          <div class="set-row"><span>Theme</span><div class="seg" data-set="theme"><button data-v="dark">Zomboid</button><button data-v="oled">Midnight</button><button data-v="light">Light</button></div></div>
           <div class="set-row"><span>Map</span><div class="seg" data-set="map"><button data-v="paper">Paper</button><button data-v="dark">Dark</button></div></div>
           <div class="set-row"><span>Text size</span><div class="seg" data-set="scale"><button data-v="s">S</button><button data-v="m">M</button><button data-v="l">L</button></div></div>
           <div class="set-row"><span>Units</span><div class="seg" data-set="units"><button data-v="metric">Metric</button><button data-v="imperial">Imperial</button></div></div>
@@ -326,11 +326,11 @@
   </div>
 </div>
 
-<script src="common.js?v=20261027w"></script>
-<script src="map.js?v=20261027w"></script>
-<script src="art.js?v=20261027w"></script>
-<script src="radar.js?v=20261027w"></script>
-<script src="screens.js?v=20261027w"></script>
-<script src="app.js?v=20261027w"></script>
+<script src="common.js?v=20261027pz"></script>
+<script src="map.js?v=20261027pz"></script>
+<script src="art.js?v=20261027pz"></script>
+<script src="radar.js?v=20261027pz"></script>
+<script src="screens.js?v=20261027pz"></script>
+<script src="app.js?v=20261027pz"></script>
 </body>
 </html>

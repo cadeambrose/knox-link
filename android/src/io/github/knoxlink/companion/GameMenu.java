@@ -23,8 +23,8 @@ final class GameMenu {
     static void open(Context c, Host host, String title, JSONObject target) {
         Theme t = host.theme();
         LinearLayout sheet = Ui.col(c);
-        sheet.addView(Ui.text(c, t, title, 20, t.text, true));
-        sheet.addView(Ui.text(c, t, "Asking the game…", 14, t.text3, false), Ui.margins(Ui.lp(-2, -2), 0, t.dp(10), 0, 0));
+        Ui.sheetTitle(c, t, sheet, title, null);
+        sheet.addView(Ui.text(c, t, "Asking the game…", 14, t.text3, false), Ui.margins(Ui.lp(-2, -2), 0, t.pz ? 0 : t.dp(10), 0, 0));
         host.openSheet(sheet);
         host.requestMenu(copy(target), menu -> show(c, host, target, new JSONArray(), Screens.Json.arr(menu.opt("opts")),
                 menu.optString("title", title), null));
@@ -41,16 +41,21 @@ final class GameMenu {
     private static void show(Context c, Host host, JSONObject target, JSONArray path, JSONArray opts, String title, Runnable back) {
         Theme t = host.theme();
         LinearLayout sheet = Ui.col(c);
-        if (back != null) {
-            TextView b = Ui.text(c, t, "‹  " + title, 17, t.text, true);
-            b.setPadding(0, t.dp(4), 0, t.dp(10));
-            b.setOnClickListener(v -> back.run());
-            sheet.addView(b);
-        } else {
-            sheet.addView(Ui.text(c, t, title, 20, t.text, true), Ui.margins(Ui.lp(-2, -2), 0, 0, 0, t.dp(12)));
-        }
+        Ui.sheetTitle(c, t, sheet, title, back == null ? null : v -> back.run());
         if (opts.length() == 0) {
             sheet.addView(Ui.text(c, t, "Nothing to do with it right now.", 14, t.text3, false));
+        }
+        // in the game's look the options sit in one panel like its right-click menu (ISContextMenu: 0.1 grey,
+        // a faint white border, a highlight under the finger); otherwise each is its own button
+        LinearLayout menu = sheet;
+        if (t.pz && opts.length() > 0) {
+            menu = Ui.col(c);
+            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+            g.setColor(0xFF161616);
+            g.setStroke(t.dp(1), 0xFF3A3A3A);
+            menu.setBackground(g);
+            menu.setPadding(t.dp(1), t.dp(1), t.dp(1), t.dp(1));
+            sheet.addView(menu, Ui.lp(-1, -2));
         }
         // the n-th option of the same name is told apart as "name#n", the way the game add-on finds it again
         Map<String, Integer> seen = new HashMap<>();
@@ -67,9 +72,9 @@ final class GameMenu {
             String why = d instanceof String ? (String) d : null;
 
             LinearLayout r = Ui.row(c);
-            r.setBackground(Ui.pressable(t, t.surface2, 14));
+            r.setBackground(Ui.pressable(t, t.pz ? 0x00000000 : t.surface2, 14));
             r.setPadding(t.dp(12), t.dp(10), t.dp(12), t.dp(10));
-            r.setMinimumHeight(t.dp(52));
+            r.setMinimumHeight(t.dp(t.pz ? 48 : 52));
             String ic = e.optString("ic", "");
             if (!ic.isEmpty()) r.addView(Screens.itemIcon(c, host, ic, "box", 34), Ui.margins(Ui.lp(-2, -2), 0, 0, t.dp(12), 0));
             LinearLayout txt = Ui.col(c);
@@ -104,7 +109,7 @@ final class GameMenu {
                     host.closeSheet();
                 }
             });
-            sheet.addView(r, Ui.margins(Ui.lp(-1, -2), 0, 0, 0, t.dp(8)));
+            menu.addView(r, Ui.margins(Ui.lp(-1, -2), 0, 0, 0, t.pz ? 0 : t.dp(8)));
         }
         host.openSheet(sheet);
     }

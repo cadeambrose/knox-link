@@ -27,10 +27,13 @@ final class Widgets {
         private final RectF r = new RectF();
         private float value, shown = -1;
         private int track, color;
+        /** The game's bars have square ends. */
+        private final boolean square;
 
         Bar(Context c, int track) {
             super(c);
             this.track = track;
+            square = c instanceof Host && ((Host) c).theme().pz;
         }
 
         void set(double v, int color) {
@@ -42,17 +45,17 @@ final class Widgets {
 
         @Override
         protected void onDraw(Canvas c) {
-            float h = getHeight(), w = getWidth();
+            float h = getHeight(), w = getWidth(), rad = square ? 0 : h / 2;
             r.set(0, 0, w, h);
             p.setColor(track);
-            c.drawRoundRect(r, h / 2, h / 2, p);
+            c.drawRoundRect(r, rad, rad, p);
             shown += (value - shown) * 0.2f;
             if (Math.abs(value - shown) > 0.002f) postInvalidateOnAnimation();
             else shown = value;
             if (shown > 0.001f) {
-                r.set(0, 0, Math.max(h, w * shown), h);
+                r.set(0, 0, square ? Math.max(1, w * shown) : Math.max(h, w * shown), h);
                 p.setColor(color);
-                c.drawRoundRect(r, h / 2, h / 2, p);
+                c.drawRoundRect(r, rad, rad, p);
             }
         }
     }

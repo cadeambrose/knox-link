@@ -263,14 +263,13 @@ final class JournalWriterSheet {
     /** A row of choices like the Settings screen's (Offline | AI). */
     private static LinearLayout segment(Context c, Theme t, String[] options, int selected, Picked picked) {
         LinearLayout seg = Ui.row(c);
-        seg.setBackground(t.round(t.surface2, 12));
-        seg.setPadding(t.dp(4), t.dp(4), t.dp(4), t.dp(4));
+        t.segBox(seg, t.surface2);
         for (int i = 0; i < options.length; i++) {
             final int idx = i;
             TextView b = Ui.text(c, t, options[i], 14.5f, i == selected ? t.text : t.text2, true);
             b.setGravity(Gravity.CENTER);
             b.setPadding(0, t.dp(10), 0, t.dp(10));
-            if (i == selected) b.setBackground(t.round(t.isLight() ? 0xFFFFFFFF : t.surface, 9));
+            b.setBackground(t.seg(i == selected));
             b.setOnClickListener(v -> {
                 if (idx != selected) picked.picked(idx);
             });

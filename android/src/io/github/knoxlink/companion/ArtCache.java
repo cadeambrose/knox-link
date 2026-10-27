@@ -100,16 +100,18 @@ final class ArtCache {
 
     /** A loose PNG under the game's media folder, e.g. "ui/Moodles/128/Status_Bleeding.png". */
     void media(String path, Cb cb) {
-        load("m:" + path, cb, () -> {
-            loadIndex();   // learns which game copy this is, so the file lands in the right place
-            File f = new File(dir, "m_" + path.replaceAll("[^A-Za-z0-9._-]", "_"));
-            byte[] png = f.isFile() ? readFile(f) : null;
-            if (png == null) {
-                png = fetch("/api/art/media?p=" + URLEncoder.encode(path, "UTF-8"));
-                if (png != null) writeFile(f, png);
-            }
-            return png == null ? null : BitmapFactory.decodeByteArray(png, 0, png.length);
-        });
+        load("m:" + path, cb, () -> mediaNow(path));
+    }
+
+    private Bitmap mediaNow(String path) throws Exception {
+        loadIndex();   // learns which game copy this is, so the file lands in the right place
+        File f = new File(dir, "m_" + path.replaceAll("[^A-Za-z0-9._-]", "_"));
+        byte[] png = f.isFile() ? readFile(f) : null;
+        if (png == null) {
+            png = fetch("/api/art/media?p=" + URLEncoder.encode(path, "UTF-8"));
+            if (png != null) writeFile(f, png);
+        }
+        return png == null ? null : BitmapFactory.decodeByteArray(png, 0, png.length);
     }
 
     /** An item icon by texture name ("Item_Bat"), padded to its full size like the game draws it. */
@@ -118,31 +120,131 @@ final class ArtCache {
             cb.done(null);
             return;
         }
-        load("i:" + tex, cb, () -> {
-            Map<String, int[]> idx = loadIndex();
-            int[] r = idx == null ? null : idx.get(tex);
-            if (r == null) {
-                // not in the texture packs: newer and modded items keep a loose icon file
-                File f = new File(dir, "l_" + tex.replaceAll("[^A-Za-z0-9._-]", "_") + ".png");
-                byte[] png = f.isFile() ? readFile(f) : fetch("/api/art/icon?n=" + URLEncoder.encode(tex, "UTF-8"));
-                if (png == null) return null;
-                if (!f.isFile()) writeFile(f, png);
-                return BitmapFactory.decodeByteArray(png, 0, png.length);
+        load("i:" + tex, cb, () -> iconNow(tex));
+    }
+
+    private Bitmap iconNow(String tex) throws Exception {
+        Map<String, int[]> idx = loadIndex();
+        int[] r = idx == null ? null : idx.get(tex);
+        if (r == null) {
+            // not in the texture packs: newer and modded items keep a loose icon file
+            File f = new File(dir, "l_" + tex.replaceAll("[^A-Za-z0-9._-]", "_") + ".png");
+            byte[] png = f.isFile() ? readFile(f) : fetch("/api/art/icon?n=" + URLEncoder.encode(tex, "UTF-8"));
+            if (png == null) return null;
+            if (!f.isFile()) writeFile(f, png);
+            return BitmapFactory.decodeByteArray(png, 0, png.length);
+        }
+        BitmapRegionDecoder dec = decoder(r[0]);
+        if (dec == null) return null;
+        Bitmap part;
+        synchronized (dec) {
+            part = dec.decodeRegion(new Rect(r[1], r[2], r[1] + r[3], r[2] + r[4]), null);
+        }
+        if (part == null) return null;
+        int fw = Math.max(r[7], r[3]), fh = Math.max(r[8], r[4]);
+        if (fw == r[3] && fh == r[4]) return part;
+        Bitmap full = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888);
+        new Canvas(full).drawBitmap(part, r[5], r[6], null);
+        part.recycle();
+        return full;
+    }
+
+    /**
+     * One of the game's pictures made into a sticker like the game's own sidebar icons: a white outline with a
+     * dark rim, in colour (on) or grey (off). name: a texture in the packs ("Item_Book") or a loose file under
+     * media ("ui/emotes/shrug.png").
+     */
+    void sticker(String name, boolean on, Cb cb) {
+        load((on ? "s1:" : "s0:") + name, cb, () -> {
+            String srcKey = (name.startsWith("ui/") ? "m:" : "i:") + name;
+            Bitmap src = memory.get(srcKey);
+            if (src == null) {
+                src = name.startsWith("ui/") ? mediaNow(name) : iconNow(name);
+                if (src != null) memory.put(srcKey, src);
             }
-            BitmapRegionDecoder dec = decoder(r[0]);
-            if (dec == null) return null;
-            Bitmap part;
-            synchronized (dec) {
-                part = dec.decodeRegion(new Rect(r[1], r[2], r[1] + r[3], r[2] + r[4]), null);
-            }
-            if (part == null) return null;
-            int fw = Math.max(r[7], r[3]), fh = Math.max(r[8], r[4]);
-            if (fw == r[3] && fh == r[4]) return part;
-            Bitmap full = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888);
-            new Canvas(full).drawBitmap(part, r[5], r[6], null);
-            part.recycle();
-            return full;
+            return src == null ? null : sticker(src, on);
         });
+    }
+
+    /** The sticker itself: the picture (grown without smoothing when small) on a square 20 px wider, a 7 px white outline, a dark rim. */
+    static Bitmap sticker(Bitmap src, boolean on) {
+        int w = src.getWidth(), h = src.getHeight(), longer = Math.max(w, h);
+        Bitmap fit;
+        if (longer <= 48) {
+            int k = Math.max(1, 100 / longer);
+            fit = Bitmap.createScaledBitmap(src, w * k, h * k, false);   // pixel art stays crisp
+        } else {
+            float s = 100f / longer;
+            fit = Bitmap.createScaledBitmap(src, Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s)), true);
+        }
+        int fw = fit.getWidth(), fh = fit.getHeight(), size = Math.max(fw, fh) + 20, ox = (size - fw) / 2, oy = (size - fh) / 2;
+        int[] in = new int[fw * fh];
+        fit.getPixels(in, 0, fw, 0, 0, fw, fh);
+        int[] px = new int[size * size];
+        boolean[] shape = new boolean[size * size];
+        for (int y = 0; y < fh; y++) {
+            for (int x = 0; x < fw; x++) {
+                int c = in[y * fw + x], i = (y + oy) * size + x + ox;
+                px[i] = c;
+                shape[i] = (c >>> 24) >= 128;
+            }
+        }
+        // the offsets within reach of the outline and rim, nearest first: the first one on the shape is the distance
+        final int reach = 11;
+        java.util.List<int[]> offs = new java.util.ArrayList<>();
+        for (int dy = -reach; dy <= reach; dy++) {
+            for (int dx = -reach; dx <= reach; dx++) {
+                if (dx * dx + dy * dy <= reach * reach) offs.add(new int[]{dx, dy, dx * dx + dy * dy});
+            }
+        }
+        java.util.Collections.sort(offs, (a, b) -> Integer.compare(a[2], b[2]));
+        int[] out = new int[size * size];
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                int i = y * size + x;
+                if (shape[i]) {
+                    int c = px[i];
+                    if (on) {
+                        out[i] = c | 0xFF000000;
+                    } else {
+                        float lum = (0.299f * ((c >> 16) & 0xFF) + 0.587f * ((c >> 8) & 0xFF) + 0.114f * (c & 0xFF)) / 255f;
+                        int v = Math.round((0.30f + 0.62f * lum) * 255);
+                        out[i] = 0xFF000000 | (v << 16) | (v << 8) | v;
+                    }
+                    continue;
+                }
+                float d = -1;
+                for (int[] o : offs) {
+                    int xx = x + o[0], yy = y + o[1];
+                    if (xx >= 0 && yy >= 0 && xx < size && yy < size && shape[yy * size + xx]) {
+                        d = (float) Math.sqrt(o[2]);
+                        break;
+                    }
+                }
+                if (d < 0) continue;
+                // white to 7 px, a soft step into the rim, the rim (black at 55 %) to 9.5 px, then fading out
+                float a, white;
+                if (d <= 7f) {
+                    a = 1f;
+                    white = 1f;
+                } else if (d <= 8f) {
+                    float t = d - 7f;
+                    a = 1f - 0.45f * t;
+                    white = (1f - t) / a;
+                } else if (d <= 9.5f) {
+                    a = 0.55f;
+                    white = 0f;
+                } else {
+                    a = Math.max(0f, 0.55f * (1f - (d - 9.5f)));
+                    white = 0f;
+                }
+                int v = Math.round(white * 255);
+                out[i] = (Math.round(a * 255) << 24) | (v << 16) | (v << 8) | v;
+            }
+        }
+        Bitmap b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        b.setPixels(out, 0, size, 0, 0, size, size);
+        return b;
     }
 
     /** One of the game's floors seen from above (the server turns the diamond back into its square), for the floor plan. */

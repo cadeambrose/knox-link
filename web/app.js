@@ -136,6 +136,7 @@ function onMessage(m) {
         $('#verText').textContent = m.version || '';
         $('#connInfo').textContent = location.host + (m.local ? ' (this device)' : '');
         KnoxArt.retry();
+        setTimeout(stickTabs, 0);   // tab icons that couldn't be made before (once retry has let go of them)
         Radar.reset();   // maybe another game: nothing of the last one stays on the radar
         subscribe();
         loadSymbols(true);
@@ -250,30 +251,48 @@ $('#ovSettings').addEventListener('click', () => { hideOverlay(); setTab('settin
 
 // ---------------------------------------------------------------- tabs
 
+// Every tab's icon is the game's own art: its sidebar icons (side), or a picture of the game made into a
+// sticker like them (stick: a white outline, grey when not chosen; KnoxArt.sticker).
 const TABS = [
-  { k: 'map', label: 'Map', icon: 'map', art: 'Map' },
-  { k: 'vitals', label: 'Vitals', icon: 'vitals', art: 'Heart' },
-  { k: 'gear', label: 'Gear', icon: 'gear', art: 'Inventory' },
-  { k: 'weapons', label: 'Weapons', icon: 'weapon', more: true },
-  { k: 'skills', label: 'Skills', icon: 'skills', more: true },
-  { k: 'comms', label: 'Radio', icon: 'radio' },
-  { k: 'base', label: 'Base', icon: 'home', more: true },
-  { k: 'journal', label: 'Journal', icon: 'book', more: true },
-  { k: 'ask', label: 'Ask', icon: 'ask', more: true },
-  { k: 'car', label: 'Car', icon: 'car' },
+  { k: 'map', label: 'Map', icon: 'map', side: 'Map' },
+  { k: 'vitals', label: 'Vitals', icon: 'vitals', side: 'Heart' },
+  { k: 'gear', label: 'Gear', icon: 'gear', side: 'Inventory' },
+  { k: 'weapons', label: 'Weapons', icon: 'weapon', side: 'War', more: true },
+  { k: 'skills', label: 'Skills', icon: 'skills', stick: 'Item_Book', more: true },
+  { k: 'comms', label: 'Radio', icon: 'radio', stick: 'Item_RadioRed' },
+  { k: 'base', label: 'Base', icon: 'home', side: 'Build', more: true },
+  { k: 'journal', label: 'Journal', icon: 'book', stick: 'Item_Diary2', more: true },
+  { k: 'ask', label: 'Ask', icon: 'ask', stick: 'ui/emotes/shrug.png', more: true },
+  { k: 'car', label: 'Car', icon: 'car', stick: 'Item_CarKey' },
 ];
+const SETTINGS_TAB = { k: 'settings', label: 'Settings', icon: 'settings', stick: 'ui/inventoryPanes/Button_Gear.png' };
+
+/** A tab's icon: the plain icon, then the game's art over it once it has arrived (off and on). */
+function tabIcon(t, badge) {
+  const side = (s) => KnoxArt.mediaUrl(`ui/Sidebar/128/${t.side}_${s}_128.png`);
+  const art = t.side ? `<img class="art off" alt="" src="${side('Off')}"><img class="art on" alt="" src="${side('On')}">`
+    : t.stick ? `<img class="art off" alt="" data-stick="${esc(t.stick)}"><img class="art on" alt="" data-stick="${esc(t.stick)}" data-on="1">` : '';
+  return `<span class="rb-ico${art ? ' wide' : ''}">${icon(t.icon)}${art}${badge ? '<i class="badge" hidden></i>' : ''}</span>`;
+}
+
+/** Fills in the stickered tab icons under root (again after a new connection, for the ones that failed). */
+function stickTabs(root = document) {
+  for (const img of $$('img[data-stick]', root)) {
+    if (img.getAttribute('src')) continue;
+    KnoxArt.sticker(img.dataset.stick, !!img.dataset.on).then((u) => { if (u && !img.getAttribute('src')) img.src = u; });
+  }
+}
 
 function buildRail() {
-  // the game's own sidebar icons; the plain icon stays until they arrive
-  const side = (n, s) => KnoxArt.mediaUrl(`ui/Sidebar/128/${n}_${s}_128.png`);
+  // the game's own icons; the plain icon stays until they arrive
   let html = TABS.map((t) => `<button data-tab="${t.k}" class="${t.more ? 'in-more' : ''}" ${t.k === 'car' ? 'hidden' : ''} aria-label="${t.label}">
-      <span class="rb-ico${t.art ? ' wide' : ''}">${icon(t.icon)}${t.art ? `<img class="art off" alt="" src="${side(t.art, 'Off')}"><img class="art on" alt="" src="${side(t.art, 'On')}">` : ''}<i class="badge" hidden></i></span>
-      <span class="rb-label">${t.label}</span></button>`).join('');
+      ${tabIcon(t, true)}<span class="rb-label">${t.label}</span></button>`).join('');
   html += `<div class="rail-spacer"></div>
     <button id="fsRail" class="rail-fs in-more" aria-label="Full screen" hidden><span class="rb-ico">${icon('fullscreen')}</span><span class="rb-label">Full screen</span></button>
-    <button data-tab="settings" class="in-more rb-settings" aria-label="Settings"><span class="rb-ico">${icon('settings')}</span><span class="rb-label">Settings</span></button>
+    <button data-tab="settings" class="in-more rb-settings" aria-label="Settings">${tabIcon(SETTINGS_TAB)}<span class="rb-label">Settings</span></button>
     <button id="moreBtn" class="rb-more" aria-label="More"><span class="rb-ico">${icon('more')}<i class="badge" hidden></i></span><span class="rb-label">More</span></button>`;
   $('#rail').innerHTML = html;
+  stickTabs($('#rail'));
   $('#rail').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -285,14 +304,15 @@ function buildRail() {
 
 /** Phones in portrait: the tabs that don't fit the bottom bar. */
 function moreSheet() {
-  const items = [...TABS.filter((t) => t.more), { k: 'settings', label: 'Settings', icon: 'settings' }];
+  const items = [...TABS.filter((t) => t.more), SETTINGS_TAB];
   const fs = !$('#fsRail').hidden;
   openSheet(sheetHead('More') + `<div class="more-grid">${items.map((t) =>
-    `<button class="more-item${t.k === tab ? ' on' : ''}" data-act="tab" data-tab="${t.k}">${icon(t.icon)}<span>${t.label}</span></button>`).join('')}
+    `<button class="more-item${t.k === tab ? ' on' : ''}" data-act="tab" data-tab="${t.k}">${tabIcon(t)}<span>${t.label}</span></button>`).join('')}
     ${fs ? `<button class="more-item" data-act="fs">${icon('fullscreen')}<span>Full screen</span></button>` : ''}</div>`, {
     tab: (b) => { closeSheet(); setTab(b.dataset.tab); },
     fs: () => { closeSheet(); toggleFullscreen(); },
   });
+  stickTabs($('#sheet'));
 }
 
 function setTab(key) {
@@ -365,6 +385,34 @@ function weatherOf(c) {
   return night ? ['moon', 'Clear night'] : ['sun', 'Clear'];
 }
 
+// The game's weather pictures are 43x43 layers meant to be drawn over each other (its season.lua drew rain as
+// Weather_Cloud_Heavy + Weather_Rain): a picture here is a list of them, drawn in order.
+const wxPics = new Map();   // "a+b" -> blob url
+let wxKey = null;
+function showWeatherArt(layers) {
+  const key = layers ? layers.join('+') : '';
+  if (key === wxKey) return;
+  wxKey = key;
+  const img = $('#wxArt'), info = $('#info');
+  const show = (u) => {
+    if (wxKey !== key) return;
+    if (u) img.src = u;
+    info.classList.toggle('wx-ok', !!u);
+  };
+  if (!key) { show(null); return; }
+  if (wxPics.has(key)) { show(wxPics.get(key)); return; }
+  show(null);
+  Promise.all(layers.map((t) => KnoxArt.iconCanvas(t))).then((cs) => {
+    if (cs.some((c) => !c)) { if (wxKey === key) wxKey = null; return; }   // not there yet: try again next time
+    const c = document.createElement('canvas');
+    c.width = Math.max(...cs.map((x) => x.width));
+    c.height = Math.max(...cs.map((x) => x.height));
+    const g = c.getContext('2d');
+    for (const x of cs) g.drawImage(x, 0, 0);
+    c.toBlob((b) => { if (!b) return; const u = URL.createObjectURL(b); wxPics.set(key, u); show(u); });
+  });
+}
+
 function renderTop(c) {
   const time = c.time, wx = c.wx, pl = c.p || {};
   const h24 = settings.clock === '24', f = settings.units === 'imperial';
@@ -375,6 +423,9 @@ function renderTop(c) {
   if (wx) {
     const [ic, word] = weatherOf(c);
     $('#wxIcon use').setAttribute('href', '#i-' + ic);
+    // the game's own weather pictures (UI2.pack) where it has one; the plain icon for night, snow and fog
+    showWeatherArt(ic === 'rain' || ic === 'storm' ? ['Weather_Cloud_Heavy', 'Weather_Rain'] : ic === 'cloud' ? ['Weather_Cloud_Heavy']
+      : ic === 'sun' ? (wx.cloud > 0.3 ? ['Weather_Sun_Peek', 'Weather_Cloud_Light'] : ['Weather_Sun']) : null);
     const imm = !!(c.rules && c.rules.imm);
     let wind = '';
     if (wx.wind != null && imm) wind = ' · windy';
@@ -941,7 +992,8 @@ function applySettings() {
   const root = document.documentElement;
   root.dataset.theme = settings.theme;
   root.dataset.scale = settings.scale;
-  $('meta[name="theme-color"]').content = settings.theme === 'light' ? '#ffffff' : settings.theme === 'oled' ? '#0b0c0e' : '#15181d';
+  root.classList.toggle('pz', settings.theme !== 'light');   // the game's own look (see the end of app.css)
+  $('meta[name="theme-color"]').content = settings.theme === 'light' ? '#ffffff' : settings.theme === 'oled' ? '#000000' : '#050505';
   $$('.seg[data-set]').forEach((seg) => {
     $$('button', seg).forEach((b) => b.classList.toggle('on', b.dataset.v === String(settings[seg.dataset.set])));
   });

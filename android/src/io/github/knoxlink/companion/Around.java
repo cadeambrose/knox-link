@@ -123,7 +123,7 @@ final class Around extends ScrollView {
             JSONObject o = objs.optJSONObject(i);
             if (o == null) continue;
             View line = new View(c);
-            line.setBackgroundColor(t.line);
+            line.setBackgroundColor(t.lineSoft);
             box.addView(line, Ui.lp(-1, t.dp(1)));
             LinearLayout r = Ui.row(c);
             r.setMinimumHeight(t.dp(50));
@@ -183,7 +183,7 @@ final class Around extends ScrollView {
             JSONObject it = items.optJSONObject(i);
             if (it == null) continue;
             View line = new View(c);
-            line.setBackgroundColor(t.line);
+            line.setBackgroundColor(t.lineSoft);
             box.addView(line, Ui.lp(-1, t.dp(1)));
             box.addView(itemRow(c, it, cont));
         }

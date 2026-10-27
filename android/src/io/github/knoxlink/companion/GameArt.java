@@ -335,9 +335,12 @@ final class GameArt {
         protected void onDraw(Canvas c) {
             float gap = t.dpf(4);
             float s = (getWidth() - gap * 9) / 10f;
-            PorterDuffColorFilter on = new PorterDuffColorFilter(t.accent, PorterDuff.Mode.MULTIPLY);
-            PorterDuffColorFilter part = new PorterDuffColorFilter(t.accentSoft, PorterDuff.Mode.MULTIPLY);
-            PorterDuffColorFilter edge = new PorterDuffColorFilter(t.isLight() ? 0xFF8A929D : 0xFF4A515B, PorterDuff.Mode.SRC_IN);
+            // the game's colours (ISSkillProgressBar): levels reached gold {1, 0.89, 0.38}, the level being
+            // earned 0.4 grey filled as far as it has come, the rest a 0.2 grey border
+            PorterDuffColorFilter on = new PorterDuffColorFilter(t.pz ? 0xFFFFE361 : t.accent, PorterDuff.Mode.MULTIPLY);
+            PorterDuffColorFilter part = new PorterDuffColorFilter(t.pz ? 0xFF666666 : t.accentSoft, PorterDuff.Mode.MULTIPLY);
+            PorterDuffColorFilter edge = new PorterDuffColorFilter(t.pz ? 0xFF333333 : t.isLight() ? 0xFF8A929D : 0xFF4A515B, PorterDuff.Mode.SRC_IN);
+            PorterDuffColorFilter edgeNow = t.pz ? new PorterDuffColorFilter(0xFF666666, PorterDuff.Mode.SRC_IN) : edge;
             for (int i = 0; i < 10; i++) {
                 float x = i * (s + gap);
                 dst.set(x, 0, x + s, s);
@@ -353,7 +356,7 @@ final class GameArt {
                         c.drawBitmap(fill, src, dst, p);
                         dst.set(x, 0, x + s, s);
                     }
-                    p.setColorFilter(i < level ? on : edge);
+                    p.setColorFilter(i < level ? on : i == level ? edgeNow : edge);
                     c.drawBitmap(border, null, dst, p);
                 } else {
                     Paint q = new Paint(Paint.ANTI_ALIAS_FLAG);

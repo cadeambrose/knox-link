@@ -165,7 +165,8 @@ final class WeaponsScreen extends FrameLayout {
         FrameLayout f = new FrameLayout(c);
         android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{0xFF2A2F37, 0xFF121418});
-        g.setCornerRadius(t.dpf(12));
+        g.setCornerRadius(t.pz ? 0 : t.dpf(12));
+        if (t.pz) g.setStroke(t.dp(1), 0xFF3A3A3A);
         f.setBackground(g);
         ImageView iv = new ImageView(c);
         iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -496,7 +497,7 @@ final class WeaponsScreen extends FrameLayout {
             TextView btn = Ui.text(c, t, label, 16, enabled ? t.accentInk : t.text3, true);
             btn.setGravity(Gravity.CENTER);
             btn.setMinHeight(t.dp(50));
-            btn.setBackground(Ui.pressable(t, enabled ? t.accent : t.surface2, 14));
+            btn.setBackground(Ui.button(t, enabled));
             if (act != null) {
                 Runnable a = act;
                 btn.setOnClickListener(v -> a.run());
@@ -723,9 +724,18 @@ final class WeaponsScreen extends FrameLayout {
             float w = getWidth(), h = getHeight();
             r.set(0, 0, w, h);
             p.setStyle(Paint.Style.FILL);
-            p.setShader(new RadialGradient(w / 2, h / 2, Math.max(w, h) * 0.7f, 0xFF2C323B, 0xFF0E1013, Shader.TileMode.CLAMP));
-            c.drawRoundRect(r, t.dpf(16), t.dpf(16), p);
+            // a workbench lit from the middle; in the game's look neutral greys in one of its panels
+            p.setShader(new RadialGradient(w / 2, h / 2, Math.max(w, h) * 0.7f, t.pz ? 0xFF2E2E2E : 0xFF2C323B,
+                    t.pz ? 0xFF080808 : 0xFF0E1013, Shader.TileMode.CLAMP));
+            c.drawRoundRect(r, t.pz ? 0 : t.dpf(16), t.pz ? 0 : t.dpf(16), p);
             p.setShader(null);
+            if (t.pz) {
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(t.dpf(1));
+                p.setColor(t.line);
+                c.drawRect(t.dpf(0.5f), t.dpf(0.5f), w - t.dpf(0.5f), h - t.dpf(0.5f), p);
+                p.setStyle(Paint.Style.FILL);
+            }
             // a faint grid, like a cutting mat
             p.setColor(0x10FFFFFF);
             p.setStrokeWidth(1);
@@ -769,12 +779,12 @@ final class WeaponsScreen extends FrameLayout {
                 // the tile
                 r.set(at[0] - tile / 2, at[1] - tile / 2, at[0] + tile / 2, at[1] + tile / 2);
                 p.setStyle(Paint.Style.FILL);
-                p.setColor(sel ? 0xFF3A3020 : 0xCC1C2027);
-                c.drawRoundRect(r, t.dpf(12), t.dpf(12), p);
+                p.setColor(sel ? (t.pz ? t.selection : 0xFF3A3020) : (t.pz ? 0xE6080808 : 0xCC1C2027));
+                c.drawRoundRect(r, t.pz ? 0 : t.dpf(12), t.pz ? 0 : t.dpf(12), p);
                 p.setStyle(Paint.Style.STROKE);
                 p.setStrokeWidth(t.dpf(sel ? 2.5f : 1.2f));
                 p.setColor(sel ? t.accent : 0x55FFFFFF);
-                c.drawRoundRect(r, t.dpf(12), t.dpf(12), p);
+                c.drawRoundRect(r, t.pz ? 0 : t.dpf(12), t.pz ? 0 : t.dpf(12), p);
                 Bitmap ic = icons.get(i);
                 if (ic != null) {
                     float s2 = Math.min((tile - t.dpf(12)) / ic.getWidth(), (tile - t.dpf(12)) / ic.getHeight());
@@ -865,12 +875,12 @@ final class WeaponsScreen extends FrameLayout {
             }
             r.set(0, y, w, y + barH);
             p.setColor(t.surface3);
-            c.drawRoundRect(r, barH / 2, barH / 2, p);
+            c.drawRoundRect(r, t.pz ? 0 : barH / 2, t.pz ? 0 : barH / 2, p);
             float lo = Math.min(cur, next), hi = Math.max(cur, next);
             int base = t.accent;
             r.set(0, y, Math.max(barH, w * (changed ? lo : cur)), y + barH);
             p.setColor(base);
-            if (cur > 0.001f || changed) c.drawRoundRect(r, barH / 2, barH / 2, p);
+            if (cur > 0.001f || changed) c.drawRoundRect(r, t.pz ? 0 : barH / 2, t.pz ? 0 : barH / 2, p);
             if (changed && hi - lo > 0.001f) {
                 // the change: green when it's better, red when it's worse
                 p.setColor(better ? t.good : t.bad);

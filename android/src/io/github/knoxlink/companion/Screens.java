@@ -940,15 +940,15 @@ final class Screens {
 
             // On you · Around you · Craft
             segRow = Ui.row(c);
-            segRow.setBackground(t.round(t.surface2, 12));
-            segRow.setPadding(t.dp(4), t.dp(4), t.dp(4), t.dp(4));
+            // the game's look: its tabs, side by side (their borders shared); the app's look: a pill switch
+            t.segBox(segRow, t.surface2);
             for (String[] s : SEGMENTS) {
                 TextView b = Ui.text(c, t, s[1], 14, t.text2, true);
                 b.setGravity(Gravity.CENTER);
                 b.setPadding(0, t.dp(9), 0, t.dp(9));
                 b.setTag(s[0]);
                 b.setOnClickListener(v -> setSegment((String) v.getTag()));
-                segRow.addView(b, Ui.weight(1));
+                segRow.addView(b, t.pz && segRow.getChildCount() > 0 ? Ui.margins(Ui.weight(1), -t.dp(1), 0, 0, 0) : Ui.weight(1));
             }
             addView(segRow, Ui.margins(Ui.lp(-1, -2), t.dp(12), t.dp(12), t.dp(12), t.dp(8)));
             FrameLayout body = new FrameLayout(c);
@@ -1033,7 +1033,7 @@ final class Screens {
                 TextView b = (TextView) segRow.getChildAt(i);
                 boolean on = s.equals(b.getTag());
                 b.setTextColor(on ? t.text : t.text2);
-                b.setBackground(on ? t.round(t.isLight() ? 0xFFFFFFFF : t.surface, 9) : null);
+                b.setBackground(t.seg(on));
             }
             host.resubscribe();
         }
@@ -1331,7 +1331,7 @@ final class Screens {
             for (int i = 0; i < rows.size(); i++) {
                 if (i > 0) {
                     View line = new View(c);
-                    line.setBackgroundColor(t.line);
+                    line.setBackgroundColor(t.lineSoft);
                     box.addView(line, Ui.lp(-1, t.dp(1)));
                 }
                 box.addView(itemRow(c, rows.get(i)));
@@ -1972,8 +1972,7 @@ final class Screens {
             setPadding(t.dp(12), t.dp(12), t.dp(12), t.dp(10));
 
             seg = Ui.row(c);
-            seg.setBackground(t.round(t.surface2, 12));
-            seg.setPadding(t.dp(4), t.dp(4), t.dp(4), t.dp(4));
+            t.segBox(seg, t.surface2);
             segRadio = segButton(c, "radio", "Radio & TV");
             segChat = segButton(c, "chat", "Chat");
             seg.addView(segRadio, Ui.weight(1));
@@ -2076,7 +2075,7 @@ final class Screens {
             for (TextView b : new TextView[]{segRadio, segChat}) {
                 boolean on = (b == segChat) == chat;
                 b.setTextColor(on ? t.text : t.text2);
-                b.setBackground(on ? t.round(t.isLight() ? 0xFFFFFFFF : t.surface, 9) : null);
+                b.setBackground(t.seg(on));
             }
         }
 
@@ -2505,7 +2504,7 @@ final class Screens {
                     TextView b = (TextView) modeRow.getChildAt(i);
                     boolean on = MODES[i][0].equals(mode);
                     b.setTextColor(on ? t.text : t.text2);
-                    b.setBackground(on ? t.round(t.isLight() ? 0xFFFFFFFF : t.surface, 9) : null);
+                    b.setBackground(t.seg(on));
                 }
             }
             if (autoSwitch.isChecked() != p.optBoolean("auto")) {
@@ -2538,7 +2537,7 @@ final class Screens {
                     TextView b = (TextView) fpsRow.getChildAt(i);
                     boolean on = CAPS[i] == cap;
                     b.setTextColor(on ? t.text : t.text2);
-                    b.setBackground(on ? t.round(t.isLight() ? 0xFFFFFFFF : t.surface, 9) : null);
+                    b.setBackground(t.seg(on));
                 }
             }
             List<String> parts = new ArrayList<>();
@@ -2573,8 +2572,7 @@ final class Screens {
             rm.setMinimumHeight(t.dp(52));
             rm.addView(Ui.text(c, t, "Mode", 15, t.text, true), Ui.weight(1));
             modeRow = Ui.row(c);
-            modeRow.setBackground(t.round(t.surface2, 12));
-            modeRow.setPadding(t.dp(4), t.dp(4), t.dp(4), t.dp(4));
+            t.segBox(modeRow, t.surface2);
             for (String[] m : MODES) {
                 TextView b = Ui.text(c, t, m[1], 14, t.text2, true);
                 b.setGravity(Gravity.CENTER);
@@ -2644,8 +2642,7 @@ final class Screens {
             r0.setMinimumHeight(t.dp(52));
             r0.addView(Ui.text(c, t, "Frame rate", 15, t.text, true), Ui.weight(1));
             fpsRow = Ui.row(c);
-            fpsRow.setBackground(t.round(t.surface2, 12));
-            fpsRow.setPadding(t.dp(4), t.dp(4), t.dp(4), t.dp(4));
+            t.segBox(fpsRow, t.surface2);
             for (int cap : CAPS) {
                 TextView b = Ui.text(c, t, String.valueOf(cap), 14, t.text2, true);
                 b.setGravity(Gravity.CENTER);
@@ -2676,7 +2673,7 @@ final class Screens {
 
             LinearLayout disp = Ui.card(c, t);
             Ui.cardHead(c, t, disp, "Display");
-            seg(c, t, host, disp, "Theme", "theme", new String[][]{{"dark", "Dark"}, {"oled", "Midnight"}, {"light", "Light"}}, "dark", changed, true);
+            seg(c, t, host, disp, "Theme", "theme", new String[][]{{"dark", "Zomboid"}, {"oled", "Midnight"}, {"light", "Light"}}, "dark", changed, true);
             seg(c, t, host, disp, "Map", "map", new String[][]{{"paper", "Paper"}, {"dark", "Dark"}}, "paper", changed, false);
             seg(c, t, host, disp, "Text size", "scale", new String[][]{{"s", "S"}, {"m", "M"}, {"l", "L"}}, "m", changed, true);
             seg(c, t, host, disp, "Units", "units", new String[][]{{"metric", "Metric"}, {"imperial", "Imperial"}}, "imperial", changed, false);
@@ -2789,22 +2786,21 @@ final class Screens {
             r.setMinimumHeight(t.dp(52));
             r.addView(Ui.text(c, t, label, 15, t.text, true), Ui.weight(1));
             LinearLayout seg = Ui.row(c);
-            seg.setBackground(t.round(t.surface2, 12));
-            seg.setPadding(t.dp(4), t.dp(4), t.dp(4), t.dp(4));
+            t.segBox(seg, t.surface2);
             String cur = host.prefs().getString(key, def);
             for (String[] o : opts) {
                 TextView b = Ui.text(c, t, o[1], 14, o[0].equals(cur) ? t.text : t.text2, true);
                 b.setGravity(Gravity.CENTER);
                 b.setMinWidth(t.dp(52));
                 b.setPadding(t.dp(12), t.dp(9), t.dp(12), t.dp(9));
-                if (o[0].equals(cur)) b.setBackground(t.round(t.isLight() ? 0xFFFFFFFF : t.surface, 9));
+                b.setBackground(t.seg(o[0].equals(cur)));
                 b.setOnClickListener(v -> {
                     host.prefs().edit().putString(key, o[0]).apply();
                     for (int i = 0; i < seg.getChildCount(); i++) {
                         TextView x = (TextView) seg.getChildAt(i);
                         boolean on = x == b;
                         x.setTextColor(on ? t.text : t.text2);
-                        x.setBackground(on ? t.round(t.isLight() ? 0xFFFFFFFF : t.surface, 9) : null);
+                        x.setBackground(t.seg(on));
                     }
                     changed.onSettingsChanged(rebuild);
                 });
@@ -2819,6 +2815,7 @@ final class Screens {
             int[][] states = {{android.R.attr.state_checked}, {}};
             s.setThumbTintList(new ColorStateList(states, new int[]{0xFFFFFFFF, 0xFFFFFFFF}));
             s.setTrackTintList(new ColorStateList(states, new int[]{t.accent, t.surface3}));
+            Ui.tickBox(t, s);
             return s;
         }
 

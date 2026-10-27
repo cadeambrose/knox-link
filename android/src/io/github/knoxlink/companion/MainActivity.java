@@ -41,18 +41,21 @@ import java.util.Map;
  * that shows the live state of a Project Zomboid game running the Knox Link mod.
  */
 public class MainActivity extends Activity implements Host, Link.Listener, Screens.Settings.Changed {
+    // Each tab's picture is the game's own: its sidebar icons where it has one, else one of its item pictures
+    // made into a sticker like them ("sticker:" + texture or ui/ file; grey when off, in colour when chosen).
     private static final String[][] TABS = {
             {"map", "Map", "ui/Sidebar/128/Map_Off_128.png", "ui/Sidebar/128/Map_On_128.png", "map"},
             {"vitals", "Vitals", "ui/Sidebar/128/Heart_Off_128.png", "ui/Sidebar/128/Heart_On_128.png", "vitals"},
             {"gear", "Gear", "ui/Sidebar/128/Inventory_Off_128.png", "ui/Sidebar/128/Inventory_On_128.png", "gear"},
-            {"weapons", "Weapons", null, null, "weapon"},
-            {"skills", "Skills", null, null, "skills"},
-            {"comms", "Radio", null, null, "radio"},
-            {"base", "Base", null, null, "home"},
-            {"journal", "Journal", null, null, "book"},
-            {"ask", "Ask", null, null, "ask"},
-            {"car", "Car", null, null, "car"},
+            {"weapons", "Weapons", "ui/Sidebar/128/War_Off_128.png", "ui/Sidebar/128/War_On_128.png", "weapon"},
+            {"skills", "Skills", "sticker:Item_Book", "sticker:Item_Book", "skills"},
+            {"comms", "Radio", "sticker:Item_RadioRed", "sticker:Item_RadioRed", "radio"},
+            {"base", "Base", "ui/Sidebar/128/Build_Off_128.png", "ui/Sidebar/128/Build_On_128.png", "home"},
+            {"journal", "Journal", "sticker:Item_Diary2", "sticker:Item_Diary2", "book"},
+            {"ask", "Ask", "sticker:ui/emotes/shrug.png", "sticker:ui/emotes/shrug.png", "ask"},
+            {"car", "Car", "sticker:Item_CarKey", "sticker:Item_CarKey", "car"},
     };
+    private static final String SETTINGS_ART = "sticker:ui/inventoryPanes/Button_Gear.png";
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
@@ -523,12 +526,17 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     @Override
     public void openSheet(View contentView) {
         sheetPanel.removeAllViews();
-        View grip = new View(this);
-        grip.setBackground(theme.round(theme.surface3, 4));
-        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(theme.dp(44), theme.dp(5));
-        glp.gravity = Gravity.CENTER_HORIZONTAL;
-        glp.bottomMargin = theme.dp(14);
-        sheetPanel.addView(grip, glp);
+        // a sheet with a title bar (Ui.sheetTitle, the game's look) is a window: no grip, the bar at the very top
+        boolean titled = "titled".equals(contentView.getTag());
+        sheetPanel.setPadding(theme.dp(18), titled ? 0 : theme.dp(10), theme.dp(18), theme.dp(20));
+        if (!titled) {
+            View grip = new View(this);
+            grip.setBackground(theme.round(theme.pz ? 0xFF4A4A4A : theme.surface3, 4));
+            LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(theme.dp(44), theme.dp(5));
+            glp.gravity = Gravity.CENTER_HORIZONTAL;
+            glp.bottomMargin = theme.dp(14);
+            sheetPanel.addView(grip, glp);
+        }
         sheetPanel.addView(contentView);
         boolean wasOpen = sheetLayer.getVisibility() == View.VISIBLE;
         sheetLayer.setVisibility(View.VISIBLE);
@@ -551,10 +559,20 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
 
     @Override
     public void toast(String text, boolean bad) {
-        TextView v = Ui.text(this, theme, text, 15, bad ? 0xFFFFFFFF : theme.bg, true);
-        v.setBackground(theme.round(bad ? theme.bad : theme.text, 14));
+        TextView v;
+        if (theme.pz) {
+            // like the game's own notes: white text on a black panel with its grey border (red for trouble)
+            v = Ui.text(this, theme, text, 15, 0xFFFFFFFF, true);
+            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+            g.setColor(bad ? 0xF02A0B08 : 0xF0000000);
+            g.setStroke(theme.dp(1), bad ? theme.bad : theme.line);
+            v.setBackground(g);
+        } else {
+            v = Ui.text(this, theme, text, 15, bad ? 0xFFFFFFFF : theme.bg, true);
+            v.setBackground(theme.round(bad ? theme.bad : theme.text, 14));
+            v.setElevation(theme.dpf(6));
+        }
         v.setPadding(theme.dp(18), theme.dp(11), theme.dp(18), theme.dp(11));
-        v.setElevation(theme.dpf(6));
         toasts.addView(v, Ui.margins(Ui.lp(-2, -2), 0, theme.dp(8), 0, 0));
         while (toasts.getChildCount() > 3) toasts.removeViewAt(0);
         v.setAlpha(0f);
@@ -729,7 +747,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         bar.addView(watch, new LinearLayout.LayoutParams(-2, theme.dp(46)));
 
         LinearLayout info = Ui.row(this);
-        weatherIcon = Ui.icon(this, theme, "sun", theme.accent, 22);
+        weatherIcon = Ui.icon(this, theme, "sun", theme.accent, theme.pz ? 30 : 22);
         info.addView(weatherIcon);
         LinearLayout col = Ui.col(this);
         clockTime = Ui.ellipsize(Ui.text(this, theme, "Knox Link", 16, theme.text, true));
@@ -754,7 +772,8 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
 
         // the game's own speed buttons (media/ui/speedControls), with plain icons until they arrive
         speedRow = Ui.row(this);
-        speedRow.setBackground(theme.round(0xFF0E0F11, 12));
+        // the game shows its speed buttons on their own; the app's look keeps its dark pill
+        if (!theme.pz) speedRow.setBackground(theme.round(0xFF0E0F11, 12));
         speedRow.setPadding(theme.dp(4), theme.dp(3), theme.dp(4), theme.dp(3));
         for (int i = 0; i < 4; i++) {
             final int s = i;
@@ -780,12 +799,58 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         bar.addView(stop, Ui.margins(Ui.lp(theme.dp(44), theme.dp(44)), theme.dp(10), 0, 0, 0));
 
         conn = new View(this);
-        conn.setBackground(theme.round(theme.text3, 6));
+        conn.setBackground(theme.circle(theme.text3));
         bar.addView(conn, Ui.margins(Ui.lp(theme.dp(11), theme.dp(11)), theme.dp(14), 0, theme.dp(4), 0));
         return bar;
     }
 
     private int lastSpeed = 1;
+    private String weatherShown;
+    private final Map<String, Bitmap> weatherPics = new HashMap<>();
+
+    /**
+     * The weather picture in the top bar: the game's pixel art when it has one for this weather (drawn crisp).
+     * Its pictures are 43x43 layers drawn over each other (the game's season.lua drew rain as the heavy cloud
+     * with the rain over it), so a picture here is a list of them, in order.
+     */
+    private void showWeather(String[] layers, String icon) {
+        String key = layers != null ? String.join("+", layers) : "icon:" + icon;
+        if (key.equals(weatherShown)) return;
+        weatherShown = key;
+        Bitmap pic = layers == null ? null : weatherPics.get(key);
+        if (pic == null && layers != null) {
+            Bitmap[] got = new Bitmap[layers.length];
+            int w = 0, h = 0;
+            for (int i = 0; i < layers.length; i++) {
+                got[i] = art.peek("i", layers[i]);
+                if (got[i] == null) break;
+                w = Math.max(w, got[i].getWidth());
+                h = Math.max(h, got[i].getHeight());
+            }
+            if (got[layers.length - 1] != null) {
+                pic = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                android.graphics.Canvas cv = new android.graphics.Canvas(pic);
+                for (Bitmap g : got) cv.drawBitmap(g, 0, 0, null);
+                weatherPics.put(key, pic);
+            }
+        }
+        if (pic != null) {
+            android.graphics.drawable.BitmapDrawable d = new android.graphics.drawable.BitmapDrawable(getResources(), pic);
+            d.setFilterBitmap(false);
+            weatherIcon.setImageDrawable(d);
+            return;
+        }
+        weatherIcon.setImageDrawable(theme.icon(icon, theme.accent));
+        if (layers != null) {
+            for (String tex : layers) {
+                art.icon(tex, bm -> {
+                    if (bm == null || !key.equals(weatherShown)) return;
+                    weatherShown = null;   // look again: when the last layer arrives, the picture is made
+                    showWeather(layers, icon);
+                });
+            }
+        }
+    }
 
     private void markSpeed(int s) {
         lastSpeed = s;
@@ -801,7 +866,8 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
                 d.setFilterBitmap(false);
                 d.setAntiAlias(false);
                 b.setImageDrawable(d);
-                b.setBackground(on ? theme.round(0xFF2A1A18, 9) : null);
+                // the game marks the speed with its red "on" picture alone
+                b.setBackground(on && !theme.pz ? theme.round(0xFF2A1A18, 9) : null);
             } else {
                 b.setImageDrawable(theme.icon(SPEED_ICON[i], on ? theme.accentInk : theme.text2));
                 b.setBackground(on ? theme.round(theme.accent, 10) : null);
@@ -814,7 +880,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         rail.setPadding(theme.dp(6), theme.dp(6), theme.dp(6), theme.dp(6));
         for (String[] t : TABS) rail.addView(railButton(t[0], t[1], t[2], t[3], t[4]), Ui.margins(Ui.lp(-1, -2), 0, 0, 0, theme.dp(2)));
         rail.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1));
-        rail.addView(railButton("settings", null, null, null, "settings"));
+        rail.addView(railButton("settings", null, SETTINGS_ART, SETTINGS_ART, "settings"));
         tabButtons.get("car").setVisibility(View.GONE);
         // scrolls only if a small screen can't fit every tab
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
@@ -828,8 +894,8 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     private View railButton(String key, String label, String artOff, String artOn, String fallback) {
         LinearLayout b = Ui.col(this);
         b.setGravity(Gravity.CENTER_HORIZONTAL);
-        // compact enough for eight tabs on a handheld's second screen
-        b.setPadding(0, theme.dp(label == null ? 9 : 5), 0, theme.dp(label == null ? 9 : 4));
+        // compact enough for nine tabs on a handheld's second screen
+        b.setPadding(0, theme.dp(label == null ? 6 : 4), 0, theme.dp(label == null ? 6 : 3));
         FrameLayout iconBox = new FrameLayout(this);
         ImageView iv = new ImageView(this);
         iv.setImageDrawable(theme.icon(fallback, theme.text3));
@@ -837,24 +903,36 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         iconBox.addView(iv, new FrameLayout.LayoutParams(-1, -1));
         // "something new" dot
         View badge = new View(this);
-        badge.setBackground(theme.round(theme.bad, 5));
+        badge.setBackground(theme.circle(theme.bad));
         badge.setVisibility(View.GONE);
         iconBox.addView(badge, new FrameLayout.LayoutParams(theme.dp(9), theme.dp(9), Gravity.TOP | Gravity.END));
-        b.addView(iconBox, new LinearLayout.LayoutParams(theme.dp(artOff != null ? 36 : 26), theme.dp(artOff != null ? 27 : 26)));
+        int box = artOff != null ? 30 : 26;
+        b.addView(iconBox, new LinearLayout.LayoutParams(theme.dp(box), theme.dp(box)));
         TextView tv = null;
         if (label != null) {
             tv = Ui.text(this, theme, label, 10.5f, theme.text3, true);
-            b.addView(tv, Ui.margins(Ui.lp(-2, -2), 0, theme.dp(3), 0, 0));
+            b.addView(tv, Ui.margins(Ui.lp(-2, -2), 0, theme.dp(2), 0, 0));
         }
         b.setTag(new Object[]{iv, tv, artOff, artOn, fallback, badge});
         b.setOnClickListener(v -> setTab(key));
         tabButtons.put(key, b);
         if (artOff != null) {
-            // the game's own sidebar icons; the plain icon stays until they arrive
-            art.media(artOff, bm -> styleRail());
-            art.media(artOn, bm -> styleRail());
+            // the game's own pictures; the plain icon stays until they arrive
+            loadRailArt(artOff, false);
+            loadRailArt(artOn, true);
         }
         return b;
+    }
+
+    private void loadRailArt(String spec, boolean on) {
+        if (spec.startsWith("sticker:")) art.sticker(spec.substring(8), on, bm -> styleRail());
+        else art.media(spec, bm -> styleRail());
+    }
+
+    private Bitmap railArt(String spec, boolean on) {
+        if (spec == null) return null;
+        if (spec.startsWith("sticker:")) return art.peek(on ? "s1" : "s0", spec.substring(8));
+        return art.peek("m", spec);
     }
 
     private void styleRail() {
@@ -863,16 +941,33 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             Object[] tag = (Object[]) e.getValue().getTag();
             ImageView iv = (ImageView) tag[0];
             TextView tv = (TextView) tag[1];
-            String artPath = (String) (on ? tag[3] : tag[2]);
-            Bitmap bm = artPath == null ? null : art.peek("m", artPath);
+            Bitmap bm = railArt((String) (on ? tag[3] : tag[2]), on);
             if (bm != null) {
-                iv.setImageBitmap(bm);
-                iv.setImageAlpha(on ? 255 : 200);
+                if (iv.getTag() != bm) {
+                    android.graphics.drawable.BitmapDrawable d = new android.graphics.drawable.BitmapDrawable(getResources(), bm);
+                    d.setFilterBitmap(true);
+                    iv.setImageDrawable(d);
+                    iv.setTag(bm);
+                }
+                iv.setImageAlpha(on ? 255 : 210);
             } else {
                 iv.setImageDrawable(theme.icon((String) tag[4], on ? theme.accent : theme.text3));
+                iv.setTag(null);
             }
-            if (tv != null) tv.setTextColor(on ? theme.accent : theme.text3);
-            e.getValue().setBackground(on ? theme.round(Theme.alpha(theme.accent, 0.15f), 14) : null);
+            if (theme.pz) {
+                // the chosen tab: the game's selection, an orange-brown fill with an accent border
+                if (tv != null) tv.setTextColor(on ? 0xFFFFFFFF : theme.text2);
+                android.graphics.drawable.GradientDrawable sel = null;
+                if (on) {
+                    sel = new android.graphics.drawable.GradientDrawable();
+                    sel.setColor(theme.selection);
+                    sel.setStroke(theme.dp(1), theme.accent);
+                }
+                e.getValue().setBackground(sel);
+            } else {
+                if (tv != null) tv.setTextColor(on ? theme.accent : theme.text3);
+                e.getValue().setBackground(on ? theme.round(Theme.alpha(theme.accent, 0.15f), 14) : null);
+            }
         }
     }
 
@@ -1344,7 +1439,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     private void buildAlert() {
         alertBar = Ui.row(this);
         alertBar.setBackground(theme.card());
-        alertBar.setElevation(theme.dpf(10));
+        if (!theme.pz) alertBar.setElevation(theme.dpf(10));
         alertBar.setPadding(theme.dp(10), theme.dp(10), theme.dp(8), theme.dp(10));
         alertTile = new Widgets.Moodle(this);
         alertBar.addView(alertTile, Ui.lp(theme.dp(42), theme.dp(42)));
@@ -1557,7 +1652,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         sheetPanel.setPadding(theme.dp(18), theme.dp(10), theme.dp(18), theme.dp(20));
         android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
         bg.setColor(theme.surface);
-        float r = theme.dpf(22);
+        float r = theme.pz ? 0 : theme.dpf(22);   // the game's windows are square
         bg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
         bg.setStroke(theme.dp(1), theme.line);
         sv.setBackground(bg);
@@ -1566,7 +1661,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.min(theme.dp(560), getResources().getDisplayMetrics().widthPixels), -2,
                 Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         sheetLayer.addView(sv, lp);
-        sv.setElevation(theme.dpf(12));
+        if (!theme.pz) sv.setElevation(theme.dpf(12));
         root.addView(sheetLayer, Screens.match());
     }
 
@@ -1809,7 +1904,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         socketUp = up;
         if (!up) {
             authed = false;
-            conn.setBackground(theme.round(theme.bad, 6));
+            conn.setBackground(theme.circle(theme.bad));
             main.postDelayed(() -> {
                 if (!authed) showOverlay("wait", "Waiting for the game…", "Start Project Zomboid with Knox Link enabled. This screen connects by itself.");
             }, 1200);
@@ -1823,7 +1918,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
                 if (m.optBoolean("ok")) {
                     authed = true;
                     httpKey = m.optString("key", "");
-                    conn.setBackground(theme.round(theme.good, 6));
+                    conn.setBackground(theme.circle(theme.good));
                     art.retryNow();   // pictures asked for before the game's server was up
                     subscribe();
                     if (core == null || System.currentTimeMillis() - lastCoreAt > 3000) {
@@ -2013,7 +2108,12 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             else if (wx.optDouble("fog") > 0.35) { icon = "fog"; word = "Fog"; }
             else if (wx.optDouble("cloud") > 0.6) { icon = "cloud"; word = "Cloudy"; }
             else { icon = night ? "moon" : "sun"; word = night ? "Clear night" : "Clear"; }
-            weatherIcon.setImageDrawable(theme.icon(icon, theme.accent));
+            // the game's own weather pictures where it has one (UI2.pack), the plain icon otherwise
+            String[] layers = "storm".equals(icon) || "rain".equals(icon) ? new String[]{"Weather_Cloud_Heavy", "Weather_Rain"}
+                    : "cloud".equals(icon) ? new String[]{"Weather_Cloud_Heavy"}
+                    : "sun".equals(icon) ? (wx.optDouble("cloud") > 0.3 ? new String[]{"Weather_Sun_Peek", "Weather_Cloud_Light"} : new String[]{"Weather_Sun"})
+                    : null;
+            showWeather(layers, icon);
             boolean imm = rules != null && rules.optBoolean("imm");
             String wind = "";
             if (wx.has("wind") && imm) wind = " · windy";

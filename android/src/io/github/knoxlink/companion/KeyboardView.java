@@ -127,12 +127,24 @@ final class KeyboardView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         canvas.drawColor(t.surface2);
-        float radius = t.dpf(9);
+        // the game's look: square keys like its buttons, black with a grey border, Enter in the selection colours
+        float radius = t.pz ? 0 : t.dpf(9);
         for (Key k : keys) {
             boolean special = k.label.length() > 1 || k.label.equals(SHIFT) || k.label.equals(BACK) || k.label.equals(ENTER);
             boolean accent = k.label.equals(ENTER) || (k.label.equals(SHIFT) && (shift || capsLock));
-            fill.setColor(k == down ? t.surface3 : accent ? t.accent : special ? t.surface3 : t.surface);
-            canvas.drawRoundRect(k.r, radius, radius, fill);
+            if (t.pz) {
+                fill.setStyle(Paint.Style.FILL);
+                fill.setColor(k == down ? 0xFF4D4D4D : accent ? t.selection : special ? 0xFF1C1C1C : 0xFF000000);
+                canvas.drawRect(k.r, fill);
+                fill.setStyle(Paint.Style.STROKE);
+                fill.setStrokeWidth(t.dpf(1));
+                fill.setColor(accent ? t.accent : 0xFF5E5E5E);
+                canvas.drawRect(k.r, fill);
+                fill.setStyle(Paint.Style.FILL);
+            } else {
+                fill.setColor(k == down ? t.surface3 : accent ? t.accent : special ? t.surface3 : t.surface);
+                canvas.drawRoundRect(k.r, radius, radius, fill);
+            }
             String label = k.label.equals(ENTER) ? enterLabel : k.label.equals(SPACE) ? "space" : k.label;
             if (layer == LETTERS && k.label.length() == 1 && Character.isLetter(k.label.charAt(0)) && (shift || capsLock)) {
                 label = label.toUpperCase(java.util.Locale.ROOT);
