@@ -354,7 +354,7 @@ KL.addCollector("core", 250, function(player)
         if KL.perfState then
             local ps = KL.perfState()
             data.perf.mode, data.perf.auto, data.perf.held, data.perf.bodies = ps.mode, ps.auto, ps.held, ps.bodies
-            data.perf.rest = ps.rest
+            data.perf.rest, data.perf.fg = ps.rest, ps.fg
         end
     end
 

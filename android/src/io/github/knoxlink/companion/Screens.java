@@ -2466,8 +2466,8 @@ final class Screens {
 
         private final Host host;
         private final LinearLayout fpsRow, gameCard, modeRow;
-        private final View guideRow, bodiesRow, restRow;
-        private final Switch guideSwitch, autoSwitch, bodiesSwitch, restSwitch;
+        private final View guideRow, bodiesRow, restRow, fgRow;
+        private final Switch guideSwitch, autoSwitch, bodiesSwitch, restSwitch, fgSwitch;
         private String shownMode = "";
         private static final String[][] MODES = {{"cool", "Cool"}, {"balanced", "Balanced"}, {"smooth", "Smooth"}};
         private final TextView tempText;
@@ -2516,6 +2516,12 @@ final class Screens {
                 restSwitch.setTag(Boolean.TRUE);
                 restSwitch.setChecked(p.optBoolean("rest"));
                 restSwitch.setTag(null);
+            }
+            fgRow.setVisibility(p.has("fg") ? VISIBLE : GONE);   // only where Project Viewpoint's frame generation runs
+            if (p.has("fg") && fgSwitch.isChecked() != p.optBoolean("fg")) {
+                fgSwitch.setTag(Boolean.TRUE);
+                fgSwitch.setChecked(p.optBoolean("fg"));
+                fgSwitch.setTag(null);
             }
             int cap = p.optBoolean("unc") ? 0 : p.optInt("cap", 0);
             if (cap != shownCap) {
@@ -2611,6 +2617,21 @@ final class Screens {
             rr.setVisibility(GONE);
             restRow = rr;
             game.addView(rr);
+            // Project Viewpoint's frame generation: a made-up frame between every two real ones
+            LinearLayout rf = Ui.row(c);
+            rf.setMinimumHeight(t.dp(56));
+            LinearLayout rfText = Ui.col(c);
+            rfText.addView(Ui.text(c, t, "Frame generation", 15, t.text, true));
+            rfText.addView(Ui.text(c, t, "Smoother motion, a warmer device", 12.5f, t.text3, false), Ui.margins(Ui.lp(-2, -2), 0, t.dp(2), 0, 0));
+            rf.addView(rfText, Ui.weight(1));
+            fgSwitch = switchView(c, t);
+            fgSwitch.setOnCheckedChangeListener((v, on) -> {
+                if (v.getTag() == null) host.command("perfMode", Ui.args("fg", on), on ? "Frame generation on" : "Frame generation off");
+            });
+            rf.addView(fgSwitch);
+            rf.setVisibility(GONE);
+            fgRow = rf;
+            game.addView(rf);
             LinearLayout r0 = Ui.row(c);
             r0.setMinimumHeight(t.dp(52));
             r0.addView(Ui.text(c, t, "Frame rate", 15, t.text, true), Ui.weight(1));

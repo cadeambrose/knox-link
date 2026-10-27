@@ -76,20 +76,23 @@ Project Viewpoint's renderer needs desktop OpenGL 4.5, which only some of Zomdro
      (commit e984ef294eaf) turn the game's "is the GPU done yet?" checks into waits, so the CPU and the GPU
      take turns instead of working side by side.
    - **Environment variables** (instance settings > Advanced):
-     `TU_DEBUG=sysmem KNOXTHOR3D_RENDER_SCALE=60 KNOXTHOR3D_HASH=2`. `TU_DEBUG=sysmem` draws straight to
-     memory instead of in tiles (Viewpoint's passes are heavy on geometry, and tiling sorts all of it first).
-     The other two are KnoxThor3D's (from this repository's `extras/KnoxThor3D`, newer than the 1.1.0
-     download): the 3D view is drawn at 60 % and rebuilt to full size by Viewpoint's TAA+, and the world's
-     chunks are left out of Viewpoint's translucent pass, which sent them all through the GPU a second time
-     for their glass and soft edges (about 4 ms a frame). Window panes are then dithered into the main pass
-     (they look a little grainy); `KNOXTHOR3D_HASH=1` drops the panes for clear glass, `0` is Viewpoint's own.
-   - **Resolution 100 %** and Viewpoint's anti-aliasing on **TAA+** (both of the above need TAA).
+     `TU_DEBUG=sysmem KNOXTHOR3D_RENDER_SCALE=75 KNOXTHOR3D_HASH=2 KNOXTHOR3D_SKY=all`. `TU_DEBUG=sysmem`
+     draws straight to memory instead of in tiles (Viewpoint's passes are heavy on geometry, and tiling sorts
+     all of it first). The others are KnoxThor3D's (from this repository's `extras/KnoxThor3D`, newer than
+     the 1.1.0 download): the 3D view is drawn at 75 % and rebuilt to full size by Viewpoint's TAA+, and the
+     world's chunks are left out of Viewpoint's translucent pass, which sent them all through the GPU a second
+     time for their glass and soft edges (about 4 ms a frame). Window panes are then dithered into the main
+     pass (they look a little grainy); `KNOXTHOR3D_HASH=1` drops the panes for clear glass, `0` is Viewpoint's
+     own. `KNOXTHOR3D_SKY` is step 6.
+   - **Resolution 80 %** and Viewpoint's anti-aliasing on **TAA+** (both of the above need TAA). The 3D view
+     is then drawn at 1152 × 648, as at 100 % with a scale of 60, but the upscale and the game's own screens
+     cost less.
    - Frame cap 60.
 
-   Measured in a house, third person, playing: **60 fps held** standing and walking (lowest 41–50), where
-   TURNIP_740 at 60 % resolution made 43–47. It draws about 9–10 W, so the fan runs high with the stock
-   curve (see Heat and battery). To go back: Vulkan driver TURNIP_740, clear the environment variables,
-   resolution 60 %.
+   Measured in a house, third person, playing: **60 fps held** standing and walking (lowest about 50), where
+   TURNIP_740 at 60 % resolution made 43–47. Walking draws about 8.5 W with the fan near 80 % (10 W and 93 %
+   at 100 % resolution; see Heat and battery). To go back: Vulkan driver TURNIP_740, clear the environment
+   variables, resolution 60 %.
 5. Viewpoint settings that pay off on the Thor (its settings window, or Knox Link's modes):
 
 | Setting | Value | Effect |
@@ -102,6 +105,20 @@ Project Viewpoint's renderer needs desktop OpenGL 4.5, which only some of Zomdro
 | `graphics.preset` | Custom | otherwise Viewpoint puts its preset back at start |
 
 With these, the 3D view runs at about 40–50 fps in first/third person at 60–75 °C.
+
+6. **A sky for the Vanilla look** (`KNOXTHOR3D_SKY`). Viewpoint's Vanilla shader pack, the one a handheld can
+   run, draws the sky as a bare gradient. `KNOXTHOR3D_SKY=all` brings in the cheap part of Viewpoint's other
+   packs, and more: clouds drifting with the wind, and their shadows on the ground; the sun's glow and the
+   warm band along the horizon at sunset; the moon in its real phase; the real stars, turning through the
+   night, and the Milky Way; now and then a shooting star; a rainbow opposite the sun after rain; lightning
+   lighting up the clouds; distant haze in the sky's own colour; bluer nights (lamps keep their colour); a
+   little more colour; and wet, darker ground in the rain. Name only the parts you want
+   (`clouds sun moon stars`) or take some out (`all -meteors -night`); `aurora` adds northern lights. The sky
+   is only drawn where it shows. Measured on the Thor: about 5 % more GPU time (0.8 ms a frame), and no
+   change in power that could be told apart from run-to-run noise.
+7. **Frame generation** (Knox Link > Settings > Game, newer than 1.1.0): Viewpoint's own frame generation,
+   made to run on the Thor by KnoxThor3D. About 90 frames shown from about 55 drawn, with a little smearing at moving edges.
+   Off by default.
 
 ## 5. Heat and battery
 
@@ -118,6 +135,11 @@ With these, the 3D view runs at about 40–50 fps in first/third person at 60–
 - The fan: the curve in the handheld's settings decides how loud it gets. A steeper one (the author's: 100 %
   at 85 °C) keeps the chip cooler; a gentler one is quieter and lets the chip run warmer, which it is made for
   (it slows itself down only near 95 °C).
+- The game's main menu now runs at 30 fps (KnoxThor3D): it drew at the game's cap (90) while waiting for a tap,
+  and the fan ran hard at every start.
+- In the 3D view the GPU takes most of the power. 80 % resolution with the 3D view kept at the same size
+  (section 4) was the biggest saving. An underclock of the CPU for Zomdroid alone (ClusterTune's per-app
+  profile) held 60 fps but saved little; a stronger one dropped walking to 45 fps.
 
 ## Troubleshooting
 

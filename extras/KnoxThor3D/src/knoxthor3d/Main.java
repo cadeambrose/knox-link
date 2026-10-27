@@ -25,8 +25,9 @@ import zombie.gameStates.ChooseGameInfo;
  * Also makes Viewpoint lighter there (the crosshair depth read, DepthRead), and on ZINK_ZFA lets
  * the CPU and the GPU work on frames side by side instead of taking turns (Present). It writes
  * Viewpoint's per-draw data into a mapped buffer so the GPU's passes stay whole (Stream), can draw
- * the 3D view at a lower resolution rebuilt by Viewpoint's TAA (Scale), and can leave the world's
- * chunks out of the translucent pass (Hash).
+ * the 3D view at a lower resolution rebuilt by Viewpoint's TAA (Scale), can leave the world's
+ * chunks out of the translucent pass (Hash), can give the Vanilla pack a sky, weather and night
+ * (Sky) and lets Viewpoint's frame generation run (FrameGen).
  * Needs to be on in the main menu's mod list too, so it's already running when a save loads.
  * On a PC (no Zomdroid) nothing here does anything.
  */
@@ -149,6 +150,28 @@ public class Main {
         @Patch.OnEnter(skipOn = true)
         public static boolean enter(@Patch.Argument(0) long window) {
             return Main.zfa() && Present.swap();   // true = shown here (Zomdroid's swap is skipped)
+        }
+    }
+
+    /**
+     * The main menu draws at the game's frame cap (90) while it only waits for a tap; on a handheld that
+     * keeps the chip, and the fan, at full tilt right after the start. It's held at 30 there; loading
+     * screens keep the cap (textures go up a few a frame).
+     */
+    public static int menuFps(int fps) {
+        if (fps <= 30 || !onZomdroid()) return fps;
+        try {
+            if (zombie.GameWindow.states != null && zombie.GameWindow.states.current instanceof zombie.gameStates.MainScreenState) return 30;
+        } catch (Throwable ignored) {
+        }
+        return fps;
+    }
+
+    @Patch(className = "zombie.core.PerformanceSettings", methodName = "getLockFPS")
+    public static final class MenuFps {
+        @Patch.OnExit
+        public static void exit(@Patch.Return(readOnly = false) int fps) {
+            fps = Main.menuFps(fps);
         }
     }
 

@@ -1575,7 +1575,12 @@ const Game = {
       command('fps', { cap: Number(b.dataset.cap) }, null);
     });
     $('#perfAuto').addEventListener('change', (e) => { this.hold('auto'); command('perfMode', { auto: e.target.checked }, null); });
-    $('#perfRest').addEventListener('change', (e) => { this.hold('rest'); command('perfMode', { rest: e.target.checked }, null); });    $('#perfBodies').addEventListener('change', (e) => {
+    $('#perfRest').addEventListener('change', (e) => { this.hold('rest'); command('perfMode', { rest: e.target.checked }, null); });
+    $('#perfFg').addEventListener('change', (e) => {
+      this.hold('fg');
+      command('perfMode', { fg: e.target.checked }, e.target.checked ? 'Frame generation on' : 'Frame generation off');
+    });
+    $('#perfBodies').addEventListener('change', (e) => {
       this.hold('bodies');
       command('perfMode', { bodies: e.target.checked }, e.target.checked ? 'Bodies in 3D' : 'Flat bodies');
     });
@@ -1591,7 +1596,7 @@ const Game = {
     const p = core && core.perf;
     if (!p) return;
     // (a hold running out shows the game's own value again)
-    const sig = JSON.stringify(p) + settings.units + ['mode', 'auto', 'cap', 'guide', 'bodies', 'rest'].filter((k) => this.held(k)).join();
+    const sig = JSON.stringify(p) + settings.units + ['mode', 'auto', 'cap', 'guide', 'bodies', 'rest', 'fg'].filter((k) => this.held(k)).join();
     if (sig === this.sig) return;
     this.sig = sig;
     $('#gameCard').hidden = false;
@@ -1603,7 +1608,10 @@ const Game = {
     $('#bodiesRow').hidden = p.bodies == null;   // only with Project Viewpoint
     if (p.bodies != null && !this.held('bodies')) $('#perfBodies').checked = !!p.bodies;
     $('#restRow').hidden = p.rest == null;
-    if (p.rest != null && !this.held('rest')) $('#perfRest').checked = !!p.rest;    const cap = p.unc ? 0 : Number(p.cap) || 0;
+    if (p.rest != null && !this.held('rest')) $('#perfRest').checked = !!p.rest;
+    $('#fgRow').hidden = p.fg == null;   // only where Project Viewpoint's frame generation runs
+    if (p.fg != null && !this.held('fg')) $('#perfFg').checked = !!p.fg;
+    const cap = p.unc ? 0 : Number(p.cap) || 0;
     if (!this.held('cap')) $$('#fpsSeg button').forEach((b) => b.classList.toggle('on', Number(b.dataset.cap) === cap));
     $('#guideRow').hidden = p.guide == null;
     if (p.guide != null && !this.held('guide')) $('#guideShow').checked = !!p.guide;

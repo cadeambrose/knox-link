@@ -78,6 +78,7 @@ public final class Present {
         controlChecked = now;
         Scale.watch();
         Hash.watch();
+        FrameGen.watch();
         try {
             if (control == null) control = new File(System.getProperty("user.home"), "Zomboid/Lua/KnoxThor3D_present.txt");
             long stamp = control.lastModified();   // 0 when there's no file

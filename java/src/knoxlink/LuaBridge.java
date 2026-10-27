@@ -241,14 +241,40 @@ public final class LuaBridge {
 
     /**
      * Changes one of Project Viewpoint's settings live (what its own settings window does), for the
-     * one-tap performance modes and 3D bodies. Only its level-of-detail, model-pack and corpse
-     * settings; false otherwise.
+     * one-tap performance modes, 3D bodies and frame generation. Only its level-of-detail,
+     * model-pack, corpse and frame-generation settings; false otherwise.
      */
     @LuaMethod(name = "KnoxLink_viewpointSetting", global = true)
     public static boolean viewpointSetting(String key, String value) {
         if (key == null || value == null) return false;
-        if (!(key.startsWith("lod.") || key.startsWith("memory.pack") || key.startsWith("corpses.") || key.equals("memory.corpseMiB"))) return false;
+        if (!(key.startsWith("lod.") || key.startsWith("memory.pack") || key.startsWith("corpses.") || key.equals("memory.corpseMiB")
+                || key.equals("graphics.frameGeneration"))) return false;
         return viewpointPut(key, value);
+    }
+
+    private static Object frameGenToggle;
+    private static java.lang.reflect.Method frameGenGet, frameGenWhyNot;
+    private static boolean frameGenLooked;
+
+    /**
+     * Whether Project Viewpoint's frame generation is on (a made-up frame between every two), or nil
+     * when it can't run here: no Viewpoint, or its own frame generation needs what this device lacks
+     * (Viewpoint on Android brings one that runs under Zomdroid).
+     */
+    @LuaMethod(name = "KnoxLink_frameGen", global = true)
+    public static Boolean frameGen() {
+        try {
+            if (!frameGenLooked) {
+                frameGenLooked = true;
+                frameGenToggle = Class.forName("viewpoint.platform.Graphics").getField("FRAME_GENERATION").get(null);
+                frameGenGet = frameGenToggle.getClass().getMethod("get");
+                frameGenWhyNot = Class.forName("viewpoint.upscale.FrameGeneration").getMethod("unavailable");
+            }
+            if (frameGenToggle == null || frameGenWhyNot.invoke(null) != null) return null;
+            return (Boolean) frameGenGet.invoke(frameGenToggle);
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     private static boolean viewpointPut(String key, String value) {

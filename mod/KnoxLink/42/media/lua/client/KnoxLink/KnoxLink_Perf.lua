@@ -96,12 +96,15 @@ function KL.perfChosen(cap)
 end
 
 --- For screens: { mode = "cool"|"balanced"|"smooth"|"custom", auto = bool, held = cap the heat control holds or nil,
---- bodies = 3D bodies near you (only with Viewpoint), rest = 30 fps while paused }.
+--- bodies = 3D bodies near you (only with Viewpoint), rest = 30 fps while paused,
+--- fg = Viewpoint's frame generation (only where it can run) }.
 function KL.perfState()
     local s = settings()
     local bodies = nil
     if KnoxLink_viewpointSetting and KL.viewState and KL.viewState() then bodies = s.bodies == true end
-    return { mode = s.mode, auto = s.auto, held = held, bodies = bodies, rest = s.rest ~= false }
+    local fg = nil
+    if KnoxLink_frameGen and KL.viewState and KL.viewState() then fg = KnoxLink_frameGen() end
+    return { mode = s.mode, auto = s.auto, held = held, bodies = bodies, rest = s.rest ~= false, fg = fg }
 end
 
 KL.addHandler("perfMode", function(player, a)
@@ -111,6 +114,13 @@ KL.addHandler("perfMode", function(player, a)
         settings().bodies = a.bodies == true
     end
     if a.rest ~= nil then settings().rest = a.rest == true end
+    if a.fg ~= nil then
+        -- a made-up frame between every two: smoother motion, warmer device (Viewpoint's own switch)
+        if not (KnoxLink_frameGen and KnoxLink_frameGen() ~= nil
+                and KnoxLink_viewpointSetting("graphics.frameGeneration", a.fg == true and "true" or "false")) then
+            return false, "Only in Project Viewpoint's 3D view"
+        end
+    end
     if a.auto ~= nil then
         settings().auto = a.auto == true
         if held then
