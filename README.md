@@ -117,9 +117,12 @@ Build 41. If you try one, tell us how it went in [Issues](https://github.com/cad
 
 ## Install
 
-1. Install **ZombieBuddy** (the framework that lets mods run Java code) and enable it.
-2. Download the latest `KnoxLink-x.y.z.zip` from [Releases](https://github.com/cadeambrose/knox-link/releases) and copy
-   its `KnoxLink` and `KnoxLinkServer` folders into your `Zomboid/mods` folder.
+1. Subscribe to **[Knox Link on the Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3828489135)**;
+   Steam asks to add **ZombieBuddy** (the framework that lets mods run Java code) with it. Or, without the
+   Workshop: install ZombieBuddy, download the latest `KnoxLink-x.y.z.zip` from
+   [Releases](https://github.com/cadeambrose/knox-link/releases) and copy its `KnoxLink` and `KnoxLinkServer` folders
+   into your `Zomboid/mods` folder.
+2. ZombieBuddy asks once to allow the Knox Link Server's Java part.
 3. Enable **Knox Link - Second Screen**, **Knox Link Server (Java)** and **ZombieBuddy** for your save.
 4. In the game, press **F8** for the address, PIN and QR code.
 5. Second screen: open the address in a browser, or install `KnoxLink.apk` from the release on Android.
