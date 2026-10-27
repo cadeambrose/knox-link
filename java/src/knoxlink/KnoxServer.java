@@ -425,6 +425,11 @@ final class KnoxServer {
                 byte[] img = Avatar.png();
                 if (img != null) send(out, 200, "image/png", img, false, "Cache-Control: no-store\r\n");
                 else send(out, Avatar.available() ? 503 : 410, "text/plain", "no picture".getBytes(StandardCharsets.UTF_8), false, "Cache-Control: no-store\r\n");
+            } else if ("/api/art/floor".equals(path)) {
+                // one of the game's floors, seen from above, for the floor plan
+                byte[] png = FloorArt.png(query(parts[1], "n"));
+                if (png == null) send(out, 404, "text/plain", "not found".getBytes(StandardCharsets.UTF_8), false, "Cache-Control: max-age=3600\r\n");
+                else send(out, 200, "image/png", png, false, "Cache-Control: max-age=86400\r\n");
             } else if ("/api/photo".equals(path)) {
                 byte[] jpg = keyOk(s, parts[1]) ? Photo.get(query(parts[1], "id")) : null;
                 if (jpg == null) send(out, keyOk(s, parts[1]) ? 404 : 403, "text/plain", "no photo".getBytes(StandardCharsets.UTF_8), false, "Cache-Control: no-store\r\n");

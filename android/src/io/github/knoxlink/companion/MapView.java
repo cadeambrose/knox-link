@@ -566,25 +566,54 @@ final class MapView extends View {
     // edges, as Plan.java on the server sends them
     private static final int E_WALL = 1, E_DOOR = 2, E_DOOR_OPEN = 3, E_WINDOW = 4, E_WINDOW_OPEN = 5, E_WINDOW_BROKEN = 6,
             E_FENCE = 7, E_DOORWAY = 8, E_FRAME = 9;
-    private byte[] plan;
+    // what stands on a square ("o": low 5 bits; bits 5-6 the way it faces, N E S W)
+    private static final int BED = 1, SOFA = 2, CHAIR = 3, TABLE = 4, COUNTER = 5, SINK = 6, TOILET = 7, BATH = 8, STOVE = 9,
+            FRIDGE = 10, SHELF = 11, WARDROBE = 12, WASHER = 13, TV = 14, PLANT = 15, BOX = 16;
+    private static final int WALL_INK = 0xFF2A2622, DOOR_WOOD = 0xFF8A5A2B, GLASS = 0xF2B2D4E8;
+    private byte[] plan, planFloors, planThings;
+    private String[] planFloorNames = new String[0];
+    private int[] pieces = new int[0];   // per piece: i, j, w, h, kind, face
+    private JSONArray planCars = new JSONArray();
     private int planX, planY, planW, planH;
     private boolean planWanted;
+    private ArtCache art;
     private final Paint planPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint edgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint floorPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Path planPath = new Path();
+    private final RectF box = new RectF();
     private float[] zeds = new float[0];   // per zombie: x, y (world), kind (0 seen, 1 heard, 2 lost), attacking (1)
 
-    /** The floor plan around the character ("plan": x, y, z, w, h, c = base64, 3 bytes a square). */
+    /** Where the game's own floors come from (the server turns them from diamonds back into squares). */
+    void setArt(ArtCache a) {
+        art = a;
+    }
+
+    /** The floor plan around the character ("plan": see Plan.java): squares, floors, furniture and cars. */
     void setPlan(JSONObject d) {
-        if (d == null || !d.has("c")) {
-            plan = null;
-        } else {
+        plan = null;
+        if (d != null && d.has("c")) {
             try {
-                plan = android.util.Base64.decode(d.optString("c"), android.util.Base64.DEFAULT);
-                planX = d.optInt("x");
-                planY = d.optInt("y");
-                planW = d.optInt("w");
-                planH = d.optInt("h");
-                if (plan.length < planW * planH * 3) plan = null;
+                byte[] c = android.util.Base64.decode(d.optString("c"), android.util.Base64.DEFAULT);
+                int w = d.optInt("w"), h = d.optInt("h");
+                if (w > 0 && h > 0 && c.length >= w * h * 3) {
+                    planX = d.optInt("x");
+                    planY = d.optInt("y");
+                    planW = w;
+                    planH = h;
+                    // the game's floors, what stands where, the cars (older server add-ons send none of them)
+                    byte[] f = d.has("f") ? android.util.Base64.decode(d.optString("f"), android.util.Base64.DEFAULT) : null;
+                    byte[] o = d.has("o") ? android.util.Base64.decode(d.optString("o"), android.util.Base64.DEFAULT) : null;
+                    planFloors = f != null && f.length >= w * h ? f : null;
+                    planThings = o != null && o.length >= w * h ? o : null;
+                    JSONArray fl = d.optJSONArray("fl");
+                    planFloorNames = new String[fl == null ? 0 : fl.length()];
+                    for (int i = 0; i < planFloorNames.length; i++) planFloorNames[i] = fl.optString(i);
+                    JSONArray v = d.optJSONArray("v");
+                    planCars = v == null ? new JSONArray() : v;
+                    pieces = makePieces(planThings, w, h);
+                    plan = c;
+                }
             } catch (IllegalArgumentException e) {
                 plan = null;
             }
@@ -625,147 +654,436 @@ final class MapView extends View {
         if (scale / density >= 2) invalidate();
     }
 
+    /** How big one piece of a kind can be: squares along its front, and from front to back. */
+    private static int[] span(int kind) {
+        switch (kind) {
+            case BED: return new int[]{2, 2};
+            case SOFA: return new int[]{3, 1};
+            case TABLE: return new int[]{3, 2};
+            case COUNTER:
+            case SHELF: return new int[]{8, 1};
+            case WARDROBE:
+            case BATH: return new int[]{2, 1};
+            default: return new int[]{1, 1};
+        }
+    }
+
+    /** The furniture as pieces: neighbouring squares of the same kind facing the same way are one bed, couch or counter. */
+    private static int[] makePieces(byte[] o, int n, int rows) {
+        if (o == null) return new int[0];
+        int[] out = new int[64];
+        int count = 0;
+        boolean[] used = new boolean[o.length];
+        for (int j = 0; j < rows; j++) {
+            for (int i = 0; i < n; i++) {
+                int k = j * n + i, v = o[k] & 0xff;
+                if (v == 0 || used[k]) continue;
+                int kind = v & 31, face = (v >> 5) & 3;
+                int[] s = span(kind);
+                // along its front, and back from it (the front of a north- or south-facing piece runs east-west)
+                int mw = face == 0 || face == 2 ? s[0] : s[1], mh = face == 0 || face == 2 ? s[1] : s[0];
+                int w = 1;
+                while (i + w < n && w < mw && (o[k + w] & 0xff) == v && !used[k + w]) w++;
+                int h = 1;
+                grow:
+                while (j + h < rows && h < mh) {
+                    for (int a = 0; a < w; a++) if ((o[k + h * n + a] & 0xff) != v || used[k + h * n + a]) break grow;
+                    h++;
+                }
+                for (int b = 0; b < h; b++) for (int a = 0; a < w; a++) used[k + b * n + a] = true;
+                if (count + 6 > out.length) out = java.util.Arrays.copyOf(out, out.length * 2);
+                out[count++] = i;
+                out[count++] = j;
+                out[count++] = w;
+                out[count++] = h;
+                out[count++] = kind;
+                out[count++] = face;
+            }
+        }
+        return java.util.Arrays.copyOf(out, count);
+    }
+
+    /**
+     * What the character has seen of their floor around them, drawn like the place itself: the game's own
+     * floors, the furniture from above, the walls with their doors and windows, trees and cars. What's out of
+     * view now is drawn darker: remembered, not seen.
+     */
     private void drawPlan(Canvas canvas, Palette p) {
         float zoom = scale / density;
         byte[] pl = plan;
         if (pl == null || zoom < PLAN_ZOOM * 0.7f) return;
         float fade = Math.min(1f, (zoom - PLAN_ZOOM * 0.7f) / (PLAN_ZOOM * 0.3f));
         float[] a = toWorld(0, 0), b = toWorld(getWidth(), getHeight());
-        int i0 = Math.max(0, (int) Math.floor(a[0]) - planX), i1 = Math.min(planW - 1, (int) Math.floor(b[0]) - planX);
-        int j0 = Math.max(0, (int) Math.floor(a[1]) - planY), j1 = Math.min(planH - 1, (int) Math.floor(b[1]) - planY);
+        int i0 = Math.max(0, (int) Math.floor(a[0]) - planX - 1), i1 = Math.min(planW - 1, (int) Math.floor(b[0]) - planX + 1);
+        int j0 = Math.max(0, (int) Math.floor(a[1]) - planY - 1), j1 = Math.min(planH - 1, (int) Math.floor(b[1]) - planY + 1);
         if (i0 > i1 || j0 > j1) return;
-        boolean paper = p.paper;
-        int inside = paper ? 0xFFF1EBD6 : 0xFF2B3036, outside = paper ? 0xFFD9D3BA : 0xFF20242A;
-        int memory = paper ? 0xFFE3DCC4 : 0xFF24282E;   // seen before, not in view now
-        int ink = paper ? 0xFF2B2620 : 0xFFD9DDE3, furniture = paper ? 0xFFB9A684 : 0xFF4C5560;
-        int door = paper ? 0xFF8A5A2B : 0xFFC9925A, glass = paper ? 0xFF4F7EA3 : 0xFF7FB2DC;
-        int wood = paper ? 0xFF6B4A2B : 0xFFB08A5E, tree = paper ? 0xFF7E9B5E : 0xFF3C5A3A;
-        int alpha = (int) (255 * fade);
+        int layer = fade < 0.99f ? canvas.saveLayerAlpha(0, 0, getWidth(), getHeight(), (int) (255 * fade)) : -1;
         float u = scale;   // pixels per square
+        byte[] floors = planFloors;
+        String[] names = planFloorNames;
         planPaint.setStyle(Paint.Style.FILL);
-        // the ground the character has seen: brighter where it's in view now
+        // the ground
+        for (int j = j0; j <= j1; j++) {
+            for (int i = i0; i <= i1; i++) {
+                int k = j * planW + i, b0 = pl[k * 3] & 0xff;
+                if ((b0 & 1) == 0) continue;
+                float x = sx(planX + i), y = sy(planY + j);
+                int fi = floors == null ? 0 : floors[k] & 0xff;
+                Bitmap img = fi > 0 && fi <= names.length ? floorBitmap(names[fi - 1]) : null;
+                rect.set(x, y, x + u + 0.6f, y + u + 0.6f);
+                if (img != null) {
+                    canvas.drawBitmap(img, null, rect, floorPaint);
+                } else {
+                    planPaint.setColor((b0 & 8) != 0 ? 0xFFBDB29A : 0xFF8C9670);
+                    canvas.drawRect(rect, planPaint);
+                }
+                if ((b0 & 16) != 0) stairs(canvas, x, y, u);
+            }
+        }
+        // the furniture, with a little shadow
+        int[] ps = pieces;
+        for (int q = 0; q + 5 < ps.length; q += 6) {
+            if (ps[q] + ps[q + 2] < i0 || ps[q] > i1 || ps[q + 1] + ps[q + 3] < j0 || ps[q + 1] > j1) continue;
+            piece(canvas, sx(planX + ps[q]), sy(planY + ps[q + 1]), ps[q + 2] * u, ps[q + 3] * u, ps[q + 4], ps[q + 5], u);
+        }
+        // what isn't in view now: remembered, darker (one shape, so where squares meet isn't darker twice)
+        planPath.rewind();
         for (int j = j0; j <= j1; j++) {
             for (int i = i0; i <= i1; i++) {
                 int b0 = pl[(j * planW + i) * 3] & 0xff;
-                if ((b0 & 1) == 0) continue;
-                float x = sx(planX + i), y = sy(planY + j);
-                int c = (b0 & 2) == 0 ? memory : (b0 & 8) != 0 ? inside : outside;
-                planPaint.setColor(c);
-                planPaint.setAlpha(alpha);
-                canvas.drawRect(x, y, x + u + 0.6f, y + u + 0.6f, planPaint);
-                if ((b0 & 128) != 0) {
-                    planPaint.setColor(tree);
-                    planPaint.setAlpha(alpha);
-                    canvas.drawCircle(x + u / 2, y + u / 2, u * 0.38f, planPaint);
-                } else if ((b0 & 32) != 0 || (b0 & 64) != 0) {
-                    planPaint.setColor(furniture);
-                    planPaint.setAlpha(alpha);
-                    float in = u * 0.12f;
-                    rect.set(x + in, y + in, x + u - in, y + u - in);
-                    canvas.drawRoundRect(rect, u * 0.1f, u * 0.1f, planPaint);
-                    if ((b0 & 64) != 0 && u > 14 * density) {   // storage: a drawer line
-                        edgePaint.setStyle(Paint.Style.STROKE);
-                        edgePaint.setPathEffect(null);
-                        edgePaint.setStrokeWidth(Math.max(1, u * 0.05f));
-                        edgePaint.setColor(ink);
-                        edgePaint.setAlpha(alpha / 2);
-                        canvas.drawLine(x + u * 0.3f, y + u * 0.5f, x + u * 0.7f, y + u * 0.5f, edgePaint);
-                    }
-                }
-                if ((b0 & 16) != 0) {   // stairs: treads
-                    edgePaint.setStyle(Paint.Style.STROKE);
-                    edgePaint.setPathEffect(null);
-                    edgePaint.setStrokeWidth(Math.max(1, u * 0.05f));
-                    edgePaint.setColor(ink);
-                    edgePaint.setAlpha(alpha * 2 / 3);
-                    for (int s = 1; s < 4; s++) canvas.drawLine(x + u * 0.15f, y + u * s / 4f, x + u * 0.85f, y + u * s / 4f, edgePaint);
+                if ((b0 & 1) != 0 && (b0 & 2) == 0) {
+                    float x = sx(planX + i), y = sy(planY + j);
+                    planPath.addRect(x - 0.3f, y - 0.3f, x + u + 0.3f, y + u + 0.3f, Path.Direction.CW);
                 }
             }
         }
+        planPath.setFillType(Path.FillType.WINDING);
+        planPaint.setColor(0x6B0C0E12);
+        canvas.drawPath(planPath, planPaint);
         // walls, doors and windows on the squares' north and west edges
-        float wall = Math.max(2f * density, u * 0.16f);
+        float wall = Math.max(2.5f * density, u * 0.17f);
         edgePaint.setStyle(Paint.Style.STROKE);
-        edgePaint.setStrokeCap(Paint.Cap.BUTT);
         for (int j = j0; j <= Math.min(planH - 1, j1 + 1); j++) {
             for (int i = i0; i <= Math.min(planW - 1, i1 + 1); i++) {
                 int k = (j * planW + i) * 3;
                 int n = pl[k + 1] & 0xff, w = pl[k + 2] & 0xff;
                 if (n == 0 && w == 0) continue;
                 float x = sx(planX + i), y = sy(planY + j);
-                if (n != 0) edge(canvas, n, x, y, x + u, y, true, u, wall, alpha, ink, door, glass, wood);
-                if (w != 0) edge(canvas, w, x, y, x, y + u, false, u, wall, alpha, ink, door, glass, wood);
+                if (n != 0) edge(canvas, n, x, y, x + u, y, true, u, wall);
+                if (w != 0) edge(canvas, w, x, y, x, y + u, false, u, wall);
             }
         }
         edgePaint.setPathEffect(null);
+        // trees from above, then the cars
+        for (int j = j0; j <= j1; j++) {
+            for (int i = i0; i <= i1; i++) {
+                if ((pl[(j * planW + i) * 3] & 128) != 0) tree(canvas, sx(planX + i + 0.5f), sy(planY + j + 0.5f), u);
+            }
+        }
+        for (int i = 0; i < planCars.length(); i++) vehicle(canvas, planCars.optJSONArray(i), u);
+        if (layer >= 0) canvas.restoreToCount(layer);
     }
 
-    private void edge(Canvas c, int code, float x0, float y0, float x1, float y1, boolean north, float u, float wall, int alpha,
-                      int ink, int door, int glass, int wood) {
-        int kind = code & 15;
-        edgePaint.setPathEffect(null);
-        edgePaint.setAlpha(255);
-        float jam = u * 0.14f;   // the wall stub either side of an opening
+    /** A floor's picture, or null while it's on its way (the map is drawn again when it arrives). */
+    private Bitmap floorBitmap(String name) {
+        if (art == null || name == null || name.isEmpty()) return null;
+        Bitmap b = art.peek("f", name);
+        if (b == null) art.floor(name, bm -> { if (bm != null) invalidate(); });
+        return b;
+    }
+
+    private void stairs(Canvas c, float x, float y, float u) {
+        for (int s = 0; s < 4; s++) {
+            planPaint.setColor(s % 2 == 1 ? 0x2E000000 : 0x1FFFFFFF);
+            c.drawRect(x + u * 0.08f, y + u * s / 4f, x + u * 0.92f, y + u * (s + 1) / 4f, planPaint);
+        }
+        line(c, 0x73000000, Math.max(1, u * 0.03f), x + u * 0.08f, y, x + u * 0.08f, y + u);
+        line(c, 0x73000000, Math.max(1, u * 0.03f), x + u * 0.92f, y, x + u * 0.92f, y + u);
+    }
+
+    private void line(Canvas c, int color, float width, float x0, float y0, float x1, float y1) {
+        edgePaint.setStyle(Paint.Style.STROKE);
+        edgePaint.setColor(color);
+        edgePaint.setStrokeWidth(width);
+        c.drawLine(x0, y0, x1, y1, edgePaint);
+    }
+
+    /** A rounded box: fill (0 for none), outline (0 for none). */
+    private void box(Canvas c, float x, float y, float w, float h, float r, int fill, int stroke, float sw) {
+        box.set(x, y, x + w, y + h);
+        float rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+        if (fill != 0) {
+            planPaint.setStyle(Paint.Style.FILL);
+            planPaint.setColor(fill);
+            c.drawRoundRect(box, rr, rr, planPaint);
+        }
+        if (stroke != 0) {
+            planPaint.setStyle(Paint.Style.STROKE);
+            planPaint.setColor(stroke);
+            planPaint.setStrokeWidth(sw);
+            c.drawRoundRect(box, rr, rr, planPaint);
+            planPaint.setStyle(Paint.Style.FILL);
+        }
+    }
+
+    private void dot(Canvas c, float x, float y, float r, int color) {
+        planPaint.setStyle(Paint.Style.FILL);
+        planPaint.setColor(color);
+        c.drawCircle(x, y, Math.max(0, r), planPaint);
+    }
+
+    /** One piece of furniture from above, in its box; face: the way its front points (0 N, 1 E, 2 S, 3 W). */
+    private void piece(Canvas c, float x, float y, float w, float h, int kind, int face, float u) {
+        c.save();
+        // drawn facing south (front down), then turned into place
+        boolean turned = face == 1 || face == 3;
+        float lw = turned ? h : w, ld = turned ? w : h;
+        c.translate(x + w / 2, y + h / 2);
+        c.rotate(new float[]{180, -90, 0, 90}[face]);
+        c.translate(-lw / 2, -ld / 2);
+        float k = u * 0.06f, l1 = Math.max(1, u * 0.025f);
+        box(c, k + u * 0.05f, k + u * 0.07f, lw - 2 * k, ld - 2 * k, u * 0.1f, 0x47000000, 0, 0);   // its shadow
         switch (kind) {
-            case E_WALL:
-                stroke(c, ink, wall, alpha, x0, y0, x1, y1);
+            case BED: {
+                box(c, k, k, lw - 2 * k, ld - 2 * k, u * 0.08f, 0xFF6E4D2E, 0, 0);
+                box(c, k * 2, k * 2, lw - 4 * k, ld - 4 * k, u * 0.08f, 0xFFEFE9DC, 0, 0);
+                box(c, k * 2, ld * 0.38f, lw - 4 * k, ld * 0.62f - 2 * k, u * 0.08f, 0xFF56789C, 0, 0);   // the blanket
+                line(c, 0x59FFFFFF, l1, k * 2, ld * 0.38f + u * 0.06f, lw - k * 2, ld * 0.38f + u * 0.06f);
+                int pillows = Math.max(1, Math.round(lw / u));
+                float pw = (lw - 4 * k) / pillows;
+                for (int a = 0; a < pillows; a++) box(c, k * 2 + pw * a + u * 0.06f, k * 2 + u * 0.05f, pw - u * 0.12f, u * 0.24f, u * 0.08f, 0xFFFBF8F2, 0x26000000, l1);
                 break;
-            case E_DOOR:
-            case E_DOOR_OPEN:
-            case E_DOORWAY: {
-                // the frame's ends, then the door: closed across the gap, open swung into the square
-                stroke(c, ink, wall, alpha, x0, y0, north ? x0 + jam : x0, north ? y0 : y0 + jam);
-                stroke(c, ink, wall, alpha, north ? x1 - jam : x1, north ? y1 : y1 - jam, x1, y1);
-                if (kind == E_DOOR) {
-                    stroke(c, door, wall * 0.6f, alpha, north ? x0 + jam : x0, north ? y0 : y0 + jam, north ? x1 - jam : x1, north ? y1 : y1 - jam);
-                } else if (kind == E_DOOR_OPEN) {
-                    float hx = north ? x0 + jam : x0, hy = north ? y0 : y0 + jam, len = u - 2 * jam;
-                    stroke(c, door, wall * 0.45f, alpha, hx, hy, north ? hx : hx + len, north ? hy + len : hy);
+            }
+            case SOFA: {
+                box(c, k, u * 0.1f, lw - 2 * k, ld - u * 0.16f, u * 0.1f, 0xFF8F7A63, 0, 0);
+                box(c, k, u * 0.06f, lw - 2 * k, u * 0.26f, u * 0.08f, 0xFF76624D, 0, 0);                 // the back
+                box(c, k, u * 0.1f, u * 0.18f, ld - u * 0.16f, u * 0.08f, 0xFF76624D, 0, 0);                // the arms
+                box(c, lw - k - u * 0.18f, u * 0.1f, u * 0.18f, ld - u * 0.16f, u * 0.08f, 0xFF76624D, 0, 0);
+                int seats = Math.max(1, Math.round(lw / u));
+                for (int a = 1; a < seats; a++) line(c, 0x4D000000, l1, k + (lw - 2 * k) * a / seats, u * 0.34f, k + (lw - 2 * k) * a / seats, ld - u * 0.1f);
+                break;
+            }
+            case CHAIR:
+                box(c, lw * 0.22f, ld * 0.32f, lw * 0.56f, ld * 0.5f, u * 0.08f, 0xFF8A6440, 0, 0);
+                box(c, lw * 0.2f, ld * 0.18f, lw * 0.6f, ld * 0.14f, u * 0.05f, 0xFF6E4D2E, 0, 0);
+                break;
+            case TABLE:
+                box(c, k, k, lw - 2 * k, ld - 2 * k, u * 0.08f, 0xFF9B7653, 0xFF7A5A3C, l1);
+                box(c, k * 2.2f, k * 2.2f, lw - 4.4f * k, ld - 4.4f * k, u * 0.06f, 0, 0x2EFFFFFF, l1);
+                break;
+            case COUNTER:
+            case SINK:
+                box(c, 0, 0, lw, ld * 0.74f, u * 0.03f, 0xFFD6CFBF, 0x40000000, l1);
+                line(c, 0x59000000, Math.max(1, u * 0.04f), 0, ld * 0.74f, lw, ld * 0.74f);
+                if (kind == SINK) {
+                    box(c, lw / 2 - u * 0.26f, ld * 0.16f, u * 0.52f, ld * 0.42f, u * 0.12f, 0xFFA9B6BF, 0x4D000000, l1);
+                    dot(c, lw / 2, ld * 0.1f, u * 0.04f, 0xFF7B858C);
+                }
+                break;
+            case TOILET:
+                box(c, lw * 0.24f, ld * 0.04f, lw * 0.52f, ld * 0.22f, u * 0.05f, 0xFFF4F3EF, 0x40000000, l1);
+                box.set(lw / 2 - lw * 0.22f, ld * 0.56f - ld * 0.3f, lw / 2 + lw * 0.22f, ld * 0.56f + ld * 0.3f);
+                planPaint.setStyle(Paint.Style.FILL);
+                planPaint.setColor(0xFFF4F3EF);
+                c.drawOval(box, planPaint);
+                planPaint.setStyle(Paint.Style.STROKE);
+                planPaint.setStrokeWidth(l1);
+                planPaint.setColor(0x40000000);
+                c.drawOval(box, planPaint);
+                planPaint.setStyle(Paint.Style.FILL);
+                planPaint.setColor(0xFFC9D6DD);
+                box.set(lw / 2 - lw * 0.13f, ld * 0.58f - ld * 0.19f, lw / 2 + lw * 0.13f, ld * 0.58f + ld * 0.19f);
+                c.drawOval(box, planPaint);
+                break;
+            case BATH:
+                box(c, k, k, lw - 2 * k, ld - 2 * k, u * 0.16f, 0xFFF4F3EF, 0x40000000, l1);
+                box(c, k * 2.6f, k * 2.6f, lw - 5.2f * k, ld - 5.2f * k, u * 0.14f, 0xFFCDDCE4, 0, 0);
+                dot(c, lw / 2, ld - k * 4, u * 0.04f, 0xFF7B858C);
+                break;
+            case STOVE: {
+                box(c, k, 0, lw - 2 * k, ld * 0.8f, u * 0.05f, 0xFF2F3236, 0, 0);
+                planPaint.setStyle(Paint.Style.STROKE);
+                planPaint.setStrokeWidth(Math.max(1, u * 0.04f));
+                planPaint.setColor(0xFF6D7278);
+                float[][] burners = {{0.3f, 0.25f}, {0.7f, 0.25f}, {0.3f, 0.58f}, {0.7f, 0.58f}};
+                for (float[] bn : burners) c.drawCircle(lw * bn[0], ld * bn[1], u * 0.12f, planPaint);
+                planPaint.setStyle(Paint.Style.FILL);
+                break;
+            }
+            case FRIDGE:
+                box(c, k, 0, lw - 2 * k, ld * 0.86f, u * 0.06f, 0xFFE3E6E8, 0x4D000000, l1);
+                line(c, 0x40000000, l1, k, ld * 0.3f, lw - k, ld * 0.3f);
+                line(c, 0xFF9AA1A7, Math.max(1, u * 0.05f), lw * 0.3f, ld * 0.8f, lw * 0.7f, ld * 0.8f);
+                break;
+            case SHELF: {
+                box(c, 0, 0, lw, ld * 0.5f, u * 0.03f, 0xFF7A6A58, 0, 0);
+                int[] colors = {0xFFB5523B, 0xFF3F6E9C, 0xFFC9A23A, 0xFF4F7D4A, 0xFF8C5AA0};
+                int books = (int) Math.floor(lw / (u * 0.18f));
+                planPaint.setStyle(Paint.Style.FILL);
+                for (int a = 0; a < books; a++) {
+                    planPaint.setColor(colors[a % colors.length]);
+                    c.drawRect(u * 0.06f + a * u * 0.18f, ld * 0.08f, u * 0.18f + a * u * 0.18f, ld * 0.4f, planPaint);
                 }
                 break;
             }
+            case WARDROBE:
+                box(c, 0, 0, lw, ld * 0.72f, u * 0.04f, 0xFF7C5A39, 0x4D000000, l1);
+                line(c, 0x59000000, l1, lw / 2, 0, lw / 2, ld * 0.72f);
+                dot(c, lw / 2 - u * 0.08f, ld * 0.62f, u * 0.035f, 0xFFD9C08A);
+                dot(c, lw / 2 + u * 0.08f, ld * 0.62f, u * 0.035f, 0xFFD9C08A);
+                break;
+            case WASHER:
+                box(c, k, k, lw - 2 * k, ld * 0.84f, u * 0.06f, 0xFFECEEEF, 0x4D000000, l1);
+                dot(c, lw / 2, ld * 0.48f, Math.min(lw, ld) * 0.26f, 0xFF93A7B6);
+                break;
+            case TV:
+                box(c, lw * 0.14f, ld * 0.3f, lw * 0.72f, ld * 0.24f, u * 0.04f, 0xFF5A4632, 0, 0);
+                box(c, lw * 0.08f, ld * 0.18f, lw * 0.84f, ld * 0.1f, u * 0.03f, 0xFF1B1D20, 0, 0);
+                break;
+            case PLANT:
+                dot(c, lw / 2, ld / 2, u * 0.2f, 0xFF8A5A3A);
+                dot(c, lw * 0.5f, ld * 0.32f, u * 0.17f, 0xFF4F7D3A);
+                dot(c, lw * 0.32f, ld * 0.55f, u * 0.17f, 0xFF5E9446);
+                dot(c, lw * 0.68f, ld * 0.55f, u * 0.17f, 0xFF467233);
+                dot(c, lw * 0.5f, ld * 0.62f, u * 0.17f, 0xFF6AA250);
+                break;
+            case BOX:
+                box(c, k * 1.5f, k * 1.5f, lw - 3 * k, ld - 3 * k, u * 0.03f, 0xFFA07C4F, 0xFF7A5A35, l1);
+                line(c, 0xFF7A5A35, l1, k * 1.5f, k * 1.5f, lw - k * 1.5f, ld - k * 1.5f);
+                line(c, 0xFF7A5A35, l1, lw - k * 1.5f, k * 1.5f, k * 1.5f, ld - k * 1.5f);
+                break;
+            default:
+                box(c, k * 1.8f, k * 1.8f, lw - 3.6f * k, ld - 3.6f * k, u * 0.08f, 0xFF8F8577, 0x40000000, l1);
+                break;
+        }
+        c.restore();
+    }
+
+    /** A tree from above: its crown, with the light from the south-west. */
+    private void tree(Canvas c, float x, float y, float u) {
+        float r = u * 0.72f;
+        dot(c, x + u * 0.12f, y + u * 0.16f, r, 0x4D000000);
+        dot(c, x, y, r, 0xFF3D5C2C);
+        dot(c, x - r * 0.18f, y - r * 0.2f, r * 0.68f, 0xFF4F7537);
+        dot(c, x - r * 0.3f, y - r * 0.32f, r * 0.32f, 0xFF62893F);
+    }
+
+    /** A car from above: [x, y (centre), heading (degrees, 0 east), length, width, "rrggbb"]. */
+    private void vehicle(Canvas c, JSONArray v, float u) {
+        if (v == null || v.length() < 6) return;
+        float len = (float) v.optDouble(3, 4.5) * u, wid = (float) v.optDouble(4, 1.9) * u;
+        int color;
+        try {
+            color = 0xFF000000 | Integer.parseInt(v.optString(5, "888888"), 16);
+        } catch (NumberFormatException e) {
+            color = 0xFF888888;
+        }
+        c.save();
+        c.translate(sx((float) v.optDouble(0)), sy((float) v.optDouble(1)));
+        c.rotate((float) v.optDouble(2, 0));
+        box(c, -len / 2 + u * 0.12f, -wid / 2 + u * 0.16f, len, wid, u * 0.35f, 0x4D000000, 0, 0);
+        box(c, -len / 2, -wid / 2, len, wid, u * 0.35f, color, 0x73000000, Math.max(1, u * 0.03f));
+        // the windscreen (front: +x), the roof, the back window, the lights
+        planPath.rewind();
+        planPath.moveTo(len * 0.1f, -wid * 0.42f);
+        planPath.lineTo(len * 0.27f, -wid * 0.36f);
+        planPath.lineTo(len * 0.27f, wid * 0.36f);
+        planPath.lineTo(len * 0.1f, wid * 0.42f);
+        planPath.close();
+        planPaint.setStyle(Paint.Style.FILL);
+        planPaint.setColor(0xD9192028);
+        c.drawPath(planPath, planPaint);
+        box(c, -len * 0.24f, -wid * 0.38f, len * 0.34f, wid * 0.76f, u * 0.1f, 0x24FFFFFF, 0, 0);
+        planPaint.setColor(0xD9192028);
+        c.drawRect(-len * 0.36f, -wid * 0.36f, -len * 0.26f, wid * 0.36f, planPaint);
+        planPaint.setColor(0xFFF3E6A8);
+        c.drawRect(len / 2 - u * 0.12f, -wid * 0.42f, len / 2 - u * 0.02f, -wid * 0.22f, planPaint);
+        c.drawRect(len / 2 - u * 0.12f, wid * 0.22f, len / 2 - u * 0.02f, wid * 0.42f, planPaint);
+        planPaint.setColor(0xFFB23A2E);
+        c.drawRect(-len / 2 + u * 0.02f, -wid * 0.42f, -len / 2 + u * 0.1f, -wid * 0.24f, planPaint);
+        c.drawRect(-len / 2 + u * 0.02f, wid * 0.24f, -len / 2 + u * 0.1f, wid * 0.42f, planPaint);
+        c.restore();
+    }
+
+    private void edge(Canvas c, int code, float x0, float y0, float x1, float y1, boolean north, float u, float wall) {
+        int kind = code & 15;
+        float jam = u * 0.12f;   // the wall either side of an opening
+        float gx0 = north ? x0 + jam : x0, gy0 = north ? y0 : y0 + jam, gx1 = north ? x1 - jam : x1, gy1 = north ? y1 : y1 - jam;
+        edgePaint.setPathEffect(null);
+        edgePaint.setStrokeCap(Paint.Cap.SQUARE);
+        switch (kind) {
+            case E_WALL:
+                line(c, WALL_INK, wall, x0, y0, x1, y1);
+                line(c, 0x1AFFFFFF, Math.max(1, wall * 0.18f), x0, y0, x1, y1);
+                break;
+            case E_DOOR:
+            case E_DOOR_OPEN:
+            case E_DOORWAY:
+                line(c, WALL_INK, wall, x0, y0, gx0, gy0);
+                line(c, WALL_INK, wall, gx1, gy1, x1, y1);
+                edgePaint.setStrokeCap(Paint.Cap.BUTT);
+                if (kind == E_DOOR) {
+                    line(c, DOOR_WOOD, wall * 0.5f, gx0, gy0, gx1, gy1);
+                } else if (kind == E_DOOR_OPEN) {
+                    // the door swung open into the square, and the way it swings
+                    float len = u - 2 * jam;
+                    line(c, DOOR_WOOD, wall * 0.4f, gx0, gy0, north ? gx0 : gx0 + len, north ? gy0 + len : gy0);
+                    edgePaint.setPathEffect(new DashPathEffect(new float[]{u * 0.06f, u * 0.06f}, 0));
+                    edgePaint.setColor(0x8C281E14);
+                    edgePaint.setStrokeWidth(Math.max(1, u * 0.025f));
+                    box.set(gx0 - len, gy0 - len, gx0 + len, gy0 + len);
+                    c.drawArc(box, 0, 90, false, edgePaint);
+                    edgePaint.setPathEffect(null);
+                }
+                break;
             case E_WINDOW:
             case E_WINDOW_OPEN:
             case E_WINDOW_BROKEN:
             case E_FRAME: {
-                stroke(c, ink, wall, alpha, x0, y0, north ? x0 + jam : x0, north ? y0 : y0 + jam);
-                stroke(c, ink, wall, alpha, north ? x1 - jam : x1, north ? y1 : y1 - jam, x1, y1);
-                float gx0 = north ? x0 + jam : x0, gy0 = north ? y0 : y0 + jam, gx1 = north ? x1 - jam : x1, gy1 = north ? y1 : y1 - jam;
-                if (kind == E_WINDOW_BROKEN || kind == E_FRAME) {
-                    edgePaint.setPathEffect(new DashPathEffect(new float[]{u * 0.08f, u * 0.08f}, 0));
-                    stroke(c, kind == E_FRAME ? ink : glass, wall * 0.3f, alpha, gx0, gy0, gx1, gy1);
+                line(c, WALL_INK, wall, x0, y0, gx0, gy0);
+                line(c, WALL_INK, wall, gx1, gy1, x1, y1);
+                edgePaint.setStrokeCap(Paint.Cap.BUTT);
+                // the frame either side of the glass
+                float off = wall * 0.42f, ox = north ? 0 : off, oy = north ? off : 0, thin = Math.max(1, wall * 0.16f);
+                line(c, WALL_INK, thin, gx0 - ox, gy0 - oy, gx1 - ox, gy1 - oy);
+                line(c, WALL_INK, thin, gx0 + ox, gy0 + oy, gx1 + ox, gy1 + oy);
+                if (kind == E_WINDOW) {
+                    line(c, GLASS, wall * 0.62f, gx0, gy0, gx1, gy1);
+                } else if (kind == E_WINDOW_OPEN) {
+                    line(c, GLASS, wall * 0.62f, gx0, gy0, (gx0 + gx1) / 2, (gy0 + gy1) / 2);   // the sash pushed up: half the pane
+                } else if (kind == E_WINDOW_BROKEN) {
+                    edgePaint.setPathEffect(new DashPathEffect(new float[]{u * 0.05f, u * 0.09f}, 0));
+                    line(c, GLASS, wall * 0.62f, gx0, gy0, gx1, gy1);
                     edgePaint.setPathEffect(null);
-                } else {
-                    // a pane: two thin lines, apart when the window is open
-                    float off = wall * (kind == E_WINDOW_OPEN ? 0.45f : 0.22f);
-                    float ox = north ? 0 : off, oy = north ? off : 0;
-                    stroke(c, glass, Math.max(1, wall * 0.22f), alpha, gx0 - ox, gy0 - oy, gx1 - ox, gy1 - oy);
-                    stroke(c, glass, Math.max(1, wall * 0.22f), alpha, gx0 + ox, gy0 + oy, gx1 + ox, gy1 + oy);
+                }
+                if ((code & 32) != 0) {   // curtains drawn, on the inside
+                    float cx = north ? 0 : wall * 0.7f, cy = north ? wall * 0.7f : 0;
+                    edgePaint.setPathEffect(new DashPathEffect(new float[]{u * 0.05f, u * 0.03f}, 0));
+                    line(c, 0xFFA5473F, Math.max(1.5f, wall * 0.3f), gx0 + cx, gy0 + cy, gx1 + cx, gy1 + cy);
+                    edgePaint.setPathEffect(null);
                 }
                 break;
             }
-            case E_FENCE:
-                edgePaint.setPathEffect(new DashPathEffect(new float[]{u * 0.12f, u * 0.08f}, 0));
-                stroke(c, ink, Math.max(1.5f * density, wall * 0.35f), alpha, x0, y0, x1, y1);
-                edgePaint.setPathEffect(null);
+            case E_FENCE: {
+                line(c, 0xFF7A5C3A, Math.max(1.5f * density, u * 0.06f), x0, y0, x1, y1);
+                float p = Math.max(2 * density, u * 0.12f);
+                planPaint.setStyle(Paint.Style.FILL);
+                planPaint.setColor(0xFF5E4429);
+                c.drawRect(x0 - p / 2, y0 - p / 2, x0 + p / 2, y0 + p / 2, planPaint);
+                c.drawRect((x0 + x1) / 2 - p / 2, (y0 + y1) / 2 - p / 2, (x0 + x1) / 2 + p / 2, (y0 + y1) / 2 + p / 2, planPaint);
                 break;
+            }
             default:
                 break;
         }
-        if ((code & 16) != 0) {   // barricaded: planks across the opening
+        if ((code & 16) != 0) {   // barricaded: planks nailed across
+            edgePaint.setStrokeCap(Paint.Cap.BUTT);
+            float px = north ? u * 0.2f : 0, py = north ? 0 : u * 0.2f;
             for (int s = 1; s <= 3; s++) {
-                float t = s / 4f;
-                float mx = x0 + (x1 - x0) * t, my = y0 + (y1 - y0) * t;
-                float px = north ? u * 0.18f : 0, py = north ? 0 : u * 0.18f;
-                stroke(c, wood, wall * 0.5f, alpha, mx - py * 0.6f - px, my - px * 0.6f - py, mx + py * 0.6f + px, my + px * 0.6f + py);
+                float mx = x0 + (x1 - x0) * s / 4f, my = y0 + (y1 - y0) * s / 4f;
+                line(c, 0xFF6B4A2B, wall * 0.55f, mx - py * 0.6f - px, my - px * 0.6f - py, mx + py * 0.6f + px, my + px * 0.6f + py);
             }
         }
-    }
-
-    private void stroke(Canvas c, int color, float width, int alpha, float x0, float y0, float x1, float y1) {
-        edgePaint.setColor(color);
-        edgePaint.setAlpha(alpha);
-        edgePaint.setStrokeWidth(width);
-        c.drawLine(x0, y0, x1, y1, edgePaint);
     }
 
     private void drawZombies(Canvas canvas, Palette p) {
@@ -1258,8 +1576,8 @@ final class MapView extends View {
             rect.set(sx(0), sy(0), sx(fogW * fogUnit), sy(fogH * fogUnit));
             canvas.drawBitmap(fog, null, rect, fogPaint);
         }
-        drawPlan(canvas, p);
         if (p.paper && paperTexture != null) canvas.drawRect(0, 0, getWidth(), getHeight(), paperPaint);
+        drawPlan(canvas, p);   // over the paper: the game's own floors keep their colours
         if (d != null && labels && scale / density < PLAN_ZOOM) drawLabels(canvas, d, p);
         if (showTrail) drawTrail(canvas, p);
         drawStamps(canvas, p);

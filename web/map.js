@@ -587,6 +587,52 @@ const KnoxMap = (() => {
     callbacks.onPlanWanted && callbacks.onPlanWanted(want);
   }
 
+  // what stands on a square, as Plan.java names it ("o": low 5 bits; bits 5-6 the way it faces, N E S W)
+  const BED = 1, SOFA = 2, CHAIR = 3, TABLE = 4, COUNTER = 5, SINK = 6, TOILET = 7, BATH = 8, STOVE = 9, FRIDGE = 10,
+    SHELF = 11, WARDROBE = 12, WASHER = 13, TV = 14, PLANT = 15, BOX = 16;
+  // how big one piece of each can be (squares along its front, from front to back): next squares of the same kind join it
+  const SPAN = { [BED]: [2, 2], [SOFA]: [3, 1], [TABLE]: [3, 2], [COUNTER]: [8, 1], [SHELF]: [8, 1], [WARDROBE]: [2, 1], [BATH]: [2, 1] };
+
+  /** The furniture as pieces: neighbouring squares of the same kind facing the same way are one bed, couch or counter. */
+  function pieces(pl) {
+    const out = [], o = pl.o, n = pl.w;
+    if (!o) return out;
+    const used = new Uint8Array(o.length);
+    for (let j = 0; j < pl.h; j++) {
+      for (let i = 0; i < n; i++) {
+        const k = j * n + i, v = o[k];
+        if (!v || used[k]) continue;
+        const kind = v & 31, face = (v >> 5) & 3, span = SPAN[kind] || [1, 1];
+        // along its front, and back from it (the front of a north- or south-facing piece runs east-west)
+        const mw = face === 0 || face === 2 ? span[0] : span[1], mh = face === 0 || face === 2 ? span[1] : span[0];
+        let w = 1;
+        while (i + w < n && w < mw && o[k + w] === v && !used[k + w]) w++;
+        let h = 1;
+        grow: while (j + h < pl.h && h < mh) {
+          for (let a = 0; a < w; a++) if (o[k + h * n + a] !== v || used[k + h * n + a]) break grow;
+          h++;
+        }
+        for (let b = 0; b < h; b++) for (let a = 0; a < w; a++) used[k + b * n + a] = 1;
+        out.push({ i, j, w, h, kind, face });
+      }
+    }
+    return out;
+  }
+
+  // the game's floors, seen from above (/api/art/floor), as they arrive
+  const floorArt = new Map();
+
+  function floorImage(name) {
+    let e = floorArt.get(name);
+    if (!e) {
+      e = { img: new Image(), ok: false };
+      e.img.onload = () => { e.ok = true; dirty = true; };
+      e.img.src = '/api/art/floor?n=' + encodeURIComponent(name);
+      floorArt.set(name, e);
+    }
+    return e.ok ? e.img : null;
+  }
+
   function line(color, width, x0, y0, x1, y1) {
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
@@ -596,118 +642,342 @@ const KnoxMap = (() => {
     ctx.stroke();
   }
 
-  /** What the character has seen of their floor around them: the ground, furniture, stairs, then the walls. */
+  function box(x, y, w, h, r, fill, stroke, sw) {
+    roundRect(x, y, w, h, Math.max(0, Math.min(r, w / 2, h / 2)));
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = sw || 1; ctx.stroke(); }
+  }
+
+  /**
+   * What the character has seen of their floor around them, drawn like the place itself: the game's own
+   * floors, the furniture from above, the walls with their doors and windows, trees and cars. What's out of
+   * view now is drawn darker: remembered, not seen.
+   */
   function drawPlan() {
     const pl = plan, u = view.s;   // css px per square
     if (!pl || u < PLAN_ZOOM * 0.7) return;
     const [ax, ay] = screenToWorld(0, 0), [bx, by] = screenToWorld(W, H);
-    const i0 = Math.max(0, Math.floor(ax) - pl.x), i1 = Math.min(pl.w - 1, Math.floor(bx) - pl.x);
-    const j0 = Math.max(0, Math.floor(ay) - pl.y), j1 = Math.min(pl.h - 1, Math.floor(by) - pl.y);
+    const i0 = Math.max(0, Math.floor(ax) - pl.x - 1), i1 = Math.min(pl.w - 1, Math.floor(bx) - pl.x + 1);
+    const j0 = Math.max(0, Math.floor(ay) - pl.y - 1), j1 = Math.min(pl.h - 1, Math.floor(by) - pl.y + 1);
     if (i0 > i1 || j0 > j1) return;
-    const paper = !!pal.paper, c = pl.c, n = pl.w;
-    const inside = paper ? '#f1ebd6' : '#2b3036', outside = paper ? '#d9d3ba' : '#20242a';
-    const memory = paper ? '#e3dcc4' : '#24282e';   // seen before, not in view now
-    const furniture = paper ? '#b9a684' : '#4c5560', tree = paper ? '#7e9b5e' : '#3c5a3a';
-    const ink = { ink: paper ? '#2b2620' : '#d9dde3', door: paper ? '#8a5a2b' : '#c9925a', glass: paper ? '#4f7ea3' : '#7fb2dc', wood: paper ? '#6b4a2b' : '#b08a5e' };
-    const fade = Math.min(1, (u - PLAN_ZOOM * 0.7) / (PLAN_ZOOM * 0.3));
+    const c = pl.c, n = pl.w;
     ctx.save();
-    ctx.globalAlpha = fade;
-    ctx.lineCap = 'butt';
-    // the ground the character has seen: brighter where it's in view now
+    ctx.globalAlpha = Math.min(1, (u - PLAN_ZOOM * 0.7) / (PLAN_ZOOM * 0.3));
+    ctx.imageSmoothingEnabled = true;
+    // the ground
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const k = j * n + i, b0 = c[k * 3];
+        if (!(b0 & 1)) continue;
+        const x = sx(pl.x + i), y = sy(pl.y + j);
+        const fl = pl.f && pl.f[k] ? pl.fl[pl.f[k] - 1] : null;
+        const img = fl ? floorImage(fl) : null;
+        if (img) {
+          ctx.drawImage(img, x, y, u + 0.6, u + 0.6);
+        } else {
+          ctx.fillStyle = (b0 & 8) ? '#bdb29a' : '#8c9670';
+          ctx.fillRect(x, y, u + 0.6, u + 0.6);
+        }
+        if (b0 & 16) stairs(x, y, u);
+      }
+    }
+    // the furniture, with a little shadow
+    for (const p of pl.pieces || []) {
+      if (p.i + p.w < i0 || p.i > i1 || p.j + p.h < j0 || p.j > j1) continue;
+      piece(sx(pl.x + p.i), sy(pl.y + p.j), p.w * u, p.h * u, p.kind, p.face, u);
+    }
+    // what isn't in view now: remembered, darker (one shape, so where squares meet isn't darker twice)
+    ctx.fillStyle = 'rgba(12,14,18,.42)';
+    ctx.beginPath();
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const b0 = c[(j * n + i) * 3];
-        if (!(b0 & 1)) continue;
-        const x = sx(pl.x + i), y = sy(pl.y + j);
-        ctx.fillStyle = !(b0 & 2) ? memory : (b0 & 8) ? inside : outside;
-        ctx.fillRect(x, y, u + 0.6, u + 0.6);
-        if (b0 & 128) {
-          ctx.fillStyle = tree;
-          disc(x + u / 2, y + u / 2, u * 0.38);
-        } else if (b0 & (32 | 64)) {
-          ctx.fillStyle = furniture;
-          const k = u * 0.12;
-          roundRect(x + k, y + k, u - 2 * k, u - 2 * k, u * 0.1);
-          ctx.fill();
-          if ((b0 & 64) && u > 14) {   // storage: a drawer line
-            ctx.globalAlpha = fade / 2;
-            line(ink.ink, Math.max(1, u * 0.05), x + u * 0.3, y + u * 0.5, x + u * 0.7, y + u * 0.5);
-            ctx.globalAlpha = fade;
-          }
-        }
-        if (b0 & 16) {   // stairs: treads
-          ctx.globalAlpha = fade * 2 / 3;
-          for (let s = 1; s < 4; s++) line(ink.ink, Math.max(1, u * 0.05), x + u * 0.15, y + u * s / 4, x + u * 0.85, y + u * s / 4);
-          ctx.globalAlpha = fade;
-        }
+        if ((b0 & 1) && !(b0 & 2)) ctx.rect(sx(pl.x + i) - 0.3, sy(pl.y + j) - 0.3, u + 0.6, u + 0.6);
       }
     }
+    ctx.fill('nonzero');
     // walls, doors and windows on the squares' north and west edges
-    const wall = Math.max(2, u * 0.16);
+    const wall = Math.max(2.5, u * 0.17);
     for (let j = j0; j <= Math.min(pl.h - 1, j1 + 1); j++) {
       for (let i = i0; i <= Math.min(n - 1, i1 + 1); i++) {
         const k = (j * n + i) * 3;
         const north = c[k + 1], west = c[k + 2];
         if (!north && !west) continue;
         const x = sx(pl.x + i), y = sy(pl.y + j);
-        if (north) edge(north, x, y, x + u, y, true, u, wall, ink);
-        if (west) edge(west, x, y, x, y + u, false, u, wall, ink);
+        if (north) edge(north, x, y, x + u, y, true, u, wall);
+        if (west) edge(west, x, y, x, y + u, false, u, wall);
       }
+    }
+    // trees from above, then the cars
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        if (c[(j * n + i) * 3] & 128) tree(sx(pl.x + i + 0.5), sy(pl.y + j + 0.5), u);
+      }
+    }
+    for (const v of pl.v) vehicle(v, u);
+    ctx.restore();
+  }
+
+  function stairs(x, y, u) {
+    for (let s = 0; s < 4; s++) {
+      ctx.fillStyle = s % 2 ? 'rgba(0,0,0,.18)' : 'rgba(255,255,255,.12)';
+      ctx.fillRect(x + u * 0.08, y + u * s / 4, u * 0.84, u / 4);
+    }
+    line('rgba(0,0,0,.45)', Math.max(1, u * 0.03), x + u * 0.08, y, x + u * 0.08, y + u);
+    line('rgba(0,0,0,.45)', Math.max(1, u * 0.03), x + u * 0.92, y, x + u * 0.92, y + u);
+  }
+
+  /** One piece of furniture from above, in its box; front: the way it faces (0 N, 1 E, 2 S, 3 W). */
+  function piece(x, y, w, h, kind, face, u) {
+    ctx.save();
+    // draw it facing south (front down), then turn it into place
+    const turned = face === 1 || face === 3;
+    const lw = turned ? h : w, ld = turned ? w : h;
+    ctx.translate(x + w / 2, y + h / 2);
+    ctx.rotate([Math.PI, -Math.PI / 2, 0, Math.PI / 2][face]);
+    ctx.translate(-lw / 2, -ld / 2);
+    const k = u * 0.06, line1 = Math.max(1, u * 0.025);
+    // its shadow on the floor
+    ctx.save();
+    ctx.globalAlpha *= 0.28;
+    box(k + u * 0.05, k + u * 0.07, lw - 2 * k, ld - 2 * k, u * 0.1, '#000');
+    ctx.restore();
+    switch (kind) {
+      case BED: {
+        box(k, k, lw - 2 * k, ld - 2 * k, u * 0.08, '#6e4d2e');
+        box(k * 2, k * 2, lw - 4 * k, ld - 4 * k, u * 0.08, '#efe9dc');
+        box(k * 2, ld * 0.38, lw - 4 * k, ld * 0.62 - 2 * k, u * 0.08, '#56789c');   // the blanket
+        line('rgba(255,255,255,.35)', line1, k * 2, ld * 0.38 + u * 0.06, lw - k * 2, ld * 0.38 + u * 0.06);
+        const pillows = Math.max(1, Math.round(lw / u));
+        for (let a = 0; a < pillows; a++) {
+          const pw = (lw - 4 * k) / pillows;
+          box(k * 2 + pw * a + u * 0.06, k * 2 + u * 0.05, pw - u * 0.12, u * 0.24, u * 0.08, '#fbf8f2', 'rgba(0,0,0,.15)', line1);
+        }
+        break;
+      }
+      case SOFA: {
+        box(k, u * 0.1, lw - 2 * k, ld - u * 0.16, u * 0.1, '#8f7a63');
+        box(k, u * 0.06, lw - 2 * k, u * 0.26, u * 0.08, '#76624d');                   // the back
+        box(k, u * 0.1, u * 0.18, ld - u * 0.16, u * 0.08, '#76624d');                  // the arms
+        box(lw - k - u * 0.18, u * 0.1, u * 0.18, ld - u * 0.16, u * 0.08, '#76624d');
+        const seats = Math.max(1, Math.round(lw / u));
+        for (let a = 1; a < seats; a++) line('rgba(0,0,0,.3)', line1, k + (lw - 2 * k) * a / seats, u * 0.34, k + (lw - 2 * k) * a / seats, ld - u * 0.1);
+        break;
+      }
+      case CHAIR:
+        box(lw * 0.22, ld * 0.32, lw * 0.56, ld * 0.5, u * 0.08, '#8a6440');
+        box(lw * 0.2, ld * 0.18, lw * 0.6, ld * 0.14, u * 0.05, '#6e4d2e');
+        break;
+      case TABLE:
+        box(k, k, lw - 2 * k, ld - 2 * k, u * 0.08, '#9b7653', '#7a5a3c', line1);
+        box(k * 2.2, k * 2.2, lw - 4.4 * k, ld - 4.4 * k, u * 0.06, null, 'rgba(255,255,255,.18)', line1);
+        break;
+      case COUNTER:
+      case SINK:
+        box(0, 0, lw, ld * 0.74, u * 0.03, '#d6cfbf', 'rgba(0,0,0,.25)', line1);
+        line('rgba(0,0,0,.35)', Math.max(1, u * 0.04), 0, ld * 0.74, lw, ld * 0.74);
+        if (kind === SINK) {
+          box(lw / 2 - u * 0.26, ld * 0.16, u * 0.52, ld * 0.42, u * 0.12, '#a9b6bf', 'rgba(0,0,0,.3)', line1);
+          ctx.fillStyle = '#7b858c';
+          disc(lw / 2, ld * 0.1, u * 0.04);
+        }
+        break;
+      case TOILET:
+        box(lw * 0.24, ld * 0.04, lw * 0.52, ld * 0.22, u * 0.05, '#f4f3ef', 'rgba(0,0,0,.25)', line1);
+        ctx.fillStyle = '#f4f3ef';
+        ctx.beginPath(); ctx.ellipse(lw / 2, ld * 0.56, lw * 0.22, ld * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = line1; ctx.stroke();
+        ctx.fillStyle = '#c9d6dd';
+        ctx.beginPath(); ctx.ellipse(lw / 2, ld * 0.58, lw * 0.13, ld * 0.19, 0, 0, Math.PI * 2); ctx.fill();
+        break;
+      case BATH:
+        box(k, k, lw - 2 * k, ld - 2 * k, u * 0.16, '#f4f3ef', 'rgba(0,0,0,.25)', line1);
+        box(k * 2.6, k * 2.6, lw - 5.2 * k, ld - 5.2 * k, u * 0.14, '#cddce4');
+        ctx.fillStyle = '#7b858c';
+        disc(lw / 2, ld - k * 4, u * 0.04);
+        break;
+      case STOVE:
+        box(k, 0, lw - 2 * k, ld * 0.8, u * 0.05, '#2f3236');
+        ctx.strokeStyle = '#6d7278'; ctx.lineWidth = Math.max(1, u * 0.04);
+        for (const [a, b] of [[0.3, 0.25], [0.7, 0.25], [0.3, 0.58], [0.7, 0.58]]) {
+          ctx.beginPath(); ctx.arc(lw * a, ld * b, u * 0.12, 0, Math.PI * 2); ctx.stroke();
+        }
+        break;
+      case FRIDGE:
+        box(k, 0, lw - 2 * k, ld * 0.86, u * 0.06, '#e3e6e8', 'rgba(0,0,0,.3)', line1);
+        line('rgba(0,0,0,.25)', line1, k, ld * 0.3, lw - k, ld * 0.3);
+        line('#9aa1a7', Math.max(1, u * 0.05), lw * 0.3, ld * 0.8, lw * 0.7, ld * 0.8);
+        break;
+      case SHELF: {
+        box(0, 0, lw, ld * 0.5, u * 0.03, '#7a6a58');
+        const colors = ['#b5523b', '#3f6e9c', '#c9a23a', '#4f7d4a', '#8c5aa0'];
+        for (let a = 0; a < Math.floor(lw / (u * 0.18)); a++) {
+          ctx.fillStyle = colors[a % colors.length];
+          ctx.fillRect(u * 0.06 + a * u * 0.18, ld * 0.08, u * 0.12, ld * 0.32);
+        }
+        break;
+      }
+      case WARDROBE:
+        box(0, 0, lw, ld * 0.72, u * 0.04, '#7c5a39', 'rgba(0,0,0,.3)', line1);
+        line('rgba(0,0,0,.35)', line1, lw / 2, 0, lw / 2, ld * 0.72);
+        ctx.fillStyle = '#d9c08a';
+        disc(lw / 2 - u * 0.08, ld * 0.62, u * 0.035);
+        disc(lw / 2 + u * 0.08, ld * 0.62, u * 0.035);
+        break;
+      case WASHER:
+        box(k, k, lw - 2 * k, ld * 0.84, u * 0.06, '#eceeef', 'rgba(0,0,0,.3)', line1);
+        ctx.fillStyle = '#93a7b6';
+        disc(lw / 2, ld * 0.48, Math.min(lw, ld) * 0.26);
+        break;
+      case TV:
+        box(lw * 0.14, ld * 0.3, lw * 0.72, ld * 0.24, u * 0.04, '#5a4632');
+        box(lw * 0.08, ld * 0.18, lw * 0.84, ld * 0.1, u * 0.03, '#1b1d20');
+        break;
+      case PLANT:
+        ctx.fillStyle = '#8a5a3a';
+        disc(lw / 2, ld / 2, u * 0.2);
+        for (const [a, b, c] of [[0.5, 0.32, '#4f7d3a'], [0.32, 0.55, '#5e9446'], [0.68, 0.55, '#467233'], [0.5, 0.62, '#6aa250']]) {
+          ctx.fillStyle = c;
+          disc(lw * a, ld * b, u * 0.17);
+        }
+        break;
+      case BOX:
+        box(k * 1.5, k * 1.5, lw - 3 * k, ld - 3 * k, u * 0.03, '#a07c4f', '#7a5a35', line1);
+        line('#7a5a35', line1, k * 1.5, k * 1.5, lw - k * 1.5, ld - k * 1.5);
+        line('#7a5a35', line1, lw - k * 1.5, k * 1.5, k * 1.5, ld - k * 1.5);
+        break;
+      default:
+        box(k * 1.8, k * 1.8, lw - 3.6 * k, ld - 3.6 * k, u * 0.08, '#8f8577', 'rgba(0,0,0,.25)', line1);
+        break;
     }
     ctx.restore();
   }
 
-  function edge(code, x0, y0, x1, y1, north, u, wall, ink) {
+  /** A tree from above: its crown, with the light from the south-west. */
+  function tree(x, y, u) {
+    const r = u * 0.72;
+    ctx.save();
+    ctx.globalAlpha *= 0.3;
+    ctx.fillStyle = '#000';
+    disc(x + u * 0.12, y + u * 0.16, r);
+    ctx.restore();
+    ctx.fillStyle = '#3d5c2c';
+    disc(x, y, r);
+    ctx.fillStyle = '#4f7537';
+    disc(x - r * 0.18, y - r * 0.2, r * 0.68);
+    ctx.fillStyle = '#62893f';
+    disc(x - r * 0.3, y - r * 0.32, r * 0.32);
+  }
+
+  /** A car from above: [x, y (centre), heading (degrees, 0 east), length, width, "rrggbb"]. */
+  function vehicle(v, u) {
+    if (!Array.isArray(v) || v.length < 6) return;
+    const len = (Number(v[3]) || 4.5) * u, wid = (Number(v[4]) || 1.9) * u, color = '#' + String(v[5]).replace(/[^0-9a-f]/gi, '').slice(0, 6);
+    ctx.save();
+    ctx.translate(sx(Number(v[0])), sy(Number(v[1])));
+    ctx.rotate(((Number(v[2]) || 0) * Math.PI) / 180);
+    ctx.save();
+    ctx.globalAlpha *= 0.3;
+    box(-len / 2 + u * 0.12, -wid / 2 + u * 0.16, len, wid, u * 0.35, '#000');
+    ctx.restore();
+    box(-len / 2, -wid / 2, len, wid, u * 0.35, color, 'rgba(0,0,0,.45)', Math.max(1, u * 0.03));
+    // the windscreen (front: +x), the roof, the back window, the lights
+    ctx.fillStyle = 'rgba(25,32,40,.85)';
+    ctx.beginPath();
+    ctx.moveTo(len * 0.1, -wid * 0.42); ctx.lineTo(len * 0.27, -wid * 0.36); ctx.lineTo(len * 0.27, wid * 0.36); ctx.lineTo(len * 0.1, wid * 0.42);
+    ctx.closePath(); ctx.fill();
+    box(-len * 0.24, -wid * 0.38, len * 0.34, wid * 0.76, u * 0.1, 'rgba(255,255,255,.14)');
+    ctx.fillStyle = 'rgba(25,32,40,.85)';
+    ctx.fillRect(-len * 0.36, -wid * 0.36, len * 0.1, wid * 0.72);
+    ctx.fillStyle = '#f3e6a8';
+    ctx.fillRect(len / 2 - u * 0.12, -wid * 0.42, u * 0.1, wid * 0.2);
+    ctx.fillRect(len / 2 - u * 0.12, wid * 0.22, u * 0.1, wid * 0.2);
+    ctx.fillStyle = '#b23a2e';
+    ctx.fillRect(-len / 2 + u * 0.02, -wid * 0.42, u * 0.08, wid * 0.18);
+    ctx.fillRect(-len / 2 + u * 0.02, wid * 0.24, u * 0.08, wid * 0.18);
+    ctx.restore();
+  }
+
+  function edge(code, x0, y0, x1, y1, north, u, wall) {
     const kind = code & 15;
-    const jam = u * 0.14;   // the wall stub either side of an opening
+    const WALL = '#2a2622', DOOR = '#8a5a2b', GLASS = 'rgba(178,212,232,.95)';
+    const jam = u * 0.12;   // the wall either side of an opening
     const gx0 = north ? x0 + jam : x0, gy0 = north ? y0 : y0 + jam, gx1 = north ? x1 - jam : x1, gy1 = north ? y1 : y1 - jam;
+    ctx.lineCap = 'square';
     switch (kind) {
       case E_WALL:
-        line(ink.ink, wall, x0, y0, x1, y1);
+        line(WALL, wall, x0, y0, x1, y1);
+        line('rgba(255,255,255,.1)', Math.max(1, wall * 0.18), x0, y0, x1, y1);
         break;
       case E_DOOR:
       case E_DOOR_OPEN:
-      case E_DOORWAY:
-        // the frame's ends, then the door: closed across the gap, open swung into the square
-        line(ink.ink, wall, x0, y0, gx0, gy0);
-        line(ink.ink, wall, gx1, gy1, x1, y1);
-        if (kind === E_DOOR) line(ink.door, wall * 0.6, gx0, gy0, gx1, gy1);
-        else if (kind === E_DOOR_OPEN) {
+      case E_DOORWAY: {
+        line(WALL, wall, x0, y0, gx0, gy0);
+        line(WALL, wall, gx1, gy1, x1, y1);
+        ctx.lineCap = 'butt';
+        if (kind === E_DOOR) {
+          line(DOOR, wall * 0.5, gx0, gy0, gx1, gy1);
+        } else if (kind === E_DOOR_OPEN) {
+          // the door swung open into the square, and the way it swings
           const len = u - 2 * jam;
-          line(ink.door, wall * 0.45, gx0, gy0, north ? gx0 : gx0 + len, north ? gy0 + len : gy0);
+          line(DOOR, wall * 0.4, gx0, gy0, north ? gx0 : gx0 + len, north ? gy0 + len : gy0);
+          ctx.setLineDash([u * 0.06, u * 0.06]);
+          ctx.strokeStyle = 'rgba(40,30,20,.55)';
+          ctx.lineWidth = Math.max(1, u * 0.025);
+          ctx.beginPath();
+          if (north) ctx.arc(gx0, gy0, len, 0, Math.PI / 2);
+          else ctx.arc(gx0, gy0, len, 0, Math.PI / 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
         }
         break;
+      }
       case E_WINDOW:
       case E_WINDOW_OPEN:
       case E_WINDOW_BROKEN:
-      case E_FRAME:
-        line(ink.ink, wall, x0, y0, gx0, gy0);
-        line(ink.ink, wall, gx1, gy1, x1, y1);
-        if (kind === E_WINDOW_BROKEN || kind === E_FRAME) {
-          ctx.setLineDash([u * 0.08, u * 0.08]);
-          line(kind === E_FRAME ? ink.ink : ink.glass, wall * 0.3, gx0, gy0, gx1, gy1);
+      case E_FRAME: {
+        line(WALL, wall, x0, y0, gx0, gy0);
+        line(WALL, wall, gx1, gy1, x1, y1);
+        ctx.lineCap = 'butt';
+        // the frame either side of the glass
+        const off = wall * 0.42, ox = north ? 0 : off, oy = north ? off : 0, thin = Math.max(1, wall * 0.16);
+        line(WALL, thin, gx0 - ox, gy0 - oy, gx1 - ox, gy1 - oy);
+        line(WALL, thin, gx0 + ox, gy0 + oy, gx1 + ox, gy1 + oy);
+        if (kind === E_WINDOW) {
+          line(GLASS, wall * 0.62, gx0, gy0, gx1, gy1);
+        } else if (kind === E_WINDOW_OPEN) {
+          // the sash pushed up: half the pane
+          line(GLASS, wall * 0.62, gx0, gy0, (gx0 + gx1) / 2, (gy0 + gy1) / 2);
+        } else if (kind === E_WINDOW_BROKEN) {
+          ctx.setLineDash([u * 0.05, u * 0.09]);
+          line(GLASS, wall * 0.62, gx0, gy0, gx1, gy1);
           ctx.setLineDash([]);
-        } else {
-          // a pane: two thin lines, apart when the window is open
-          const off = wall * (kind === E_WINDOW_OPEN ? 0.45 : 0.22);
-          const ox = north ? 0 : off, oy = north ? off : 0, pw = Math.max(1, wall * 0.22);
-          line(ink.glass, pw, gx0 - ox, gy0 - oy, gx1 - ox, gy1 - oy);
-          line(ink.glass, pw, gx0 + ox, gy0 + oy, gx1 + ox, gy1 + oy);
+        }
+        if (code & 32) {   // curtains drawn, on the inside
+          const cx = north ? 0 : wall * 0.7, cy = north ? wall * 0.7 : 0;
+          ctx.setLineDash([u * 0.05, u * 0.03]);
+          line('#a5473f', Math.max(1.5, wall * 0.3), gx0 + cx, gy0 + cy, gx1 + cx, gy1 + cy);
+          ctx.setLineDash([]);
         }
         break;
-      case E_FENCE:
-        ctx.setLineDash([u * 0.12, u * 0.08]);
-        line(ink.ink, Math.max(1.5, wall * 0.35), x0, y0, x1, y1);
-        ctx.setLineDash([]);
+      }
+      case E_FENCE: {
+        line('#7a5c3a', Math.max(1.5, u * 0.06), x0, y0, x1, y1);
+        ctx.fillStyle = '#5e4429';
+        const p = Math.max(2, u * 0.12);
+        ctx.fillRect(x0 - p / 2, y0 - p / 2, p, p);
+        ctx.fillRect((x0 + x1) / 2 - p / 2, (y0 + y1) / 2 - p / 2, p, p);
         break;
+      }
       default:
         break;
     }
-    if (code & 16) {   // barricaded: planks across the opening
-      const px = north ? u * 0.18 : 0, py = north ? 0 : u * 0.18;
+    if (code & 16) {   // barricaded: planks nailed across
+      ctx.lineCap = 'butt';
+      const px = north ? u * 0.2 : 0, py = north ? 0 : u * 0.2;
       for (let s = 1; s <= 3; s++) {
         const mx = x0 + (x1 - x0) * s / 4, my = y0 + (y1 - y0) * s / 4;
-        line(ink.wood, wall * 0.5, mx - py * 0.6 - px, my - px * 0.6 - py, mx + py * 0.6 + px, my + px * 0.6 + py);
+        line('#6b4a2b', wall * 0.55, mx - py * 0.6 - px, my - px * 0.6 - py, mx + py * 0.6 + px, my + px * 0.6 + py);
       }
     }
   }
@@ -880,8 +1150,8 @@ const KnoxMap = (() => {
     ctx.fillRect(0, 0, W, H);
     if (data) drawTiles();
     drawFog();
-    drawPlan();
     drawPaper();
+    drawPlan();   // over the paper: the game's own floors keep their colours
     if (data && view.s < PLAN_ZOOM) drawLabels();
     drawTrail();
     drawStamps();
@@ -1188,13 +1458,24 @@ const KnoxMap = (() => {
     /** The floor plan around the character ("plan": x, y, z, w, h, c = base64, 3 bytes a square: see Plan.java). */
     setPlan(d) {
       plan = null;
+      const bytes = (s) => {
+        const raw = atob(String(s || ''));
+        const a = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) a[i] = raw.charCodeAt(i);
+        return a;
+      };
       if (d && d.c) {
         try {
-          const raw = atob(String(d.c));
-          const c = new Uint8Array(raw.length);
-          for (let i = 0; i < raw.length; i++) c[i] = raw.charCodeAt(i);
+          const c = bytes(d.c);
           const w = Number(d.w) || 0, h = Number(d.h) || 0;
-          if (w > 0 && h > 0 && c.length >= w * h * 3) plan = { x: Number(d.x) || 0, y: Number(d.y) || 0, w, h, c };
+          if (w > 0 && h > 0 && c.length >= w * h * 3) {
+            // the game's floors, what stands where, the cars (older server add-ons send none of them)
+            const f = d.f ? bytes(d.f) : null, o = d.o ? bytes(d.o) : null;
+            plan = { x: Number(d.x) || 0, y: Number(d.y) || 0, w, h, c,
+              fl: Array.isArray(d.fl) ? d.fl.map(String) : [], f: f && f.length >= w * h ? f : null,
+              o: o && o.length >= w * h ? o : null, v: Array.isArray(d.v) ? d.v : [] };
+            plan.pieces = pieces(plan);
+          }
         } catch (e) { plan = null; }
       }
       if (view.s >= PLAN_ZOOM * 0.7) dirty = true;

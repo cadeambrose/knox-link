@@ -145,6 +145,24 @@ final class ArtCache {
         });
     }
 
+    /** One of the game's floors seen from above (the server turns the diamond back into its square), for the floor plan. */
+    void floor(String name, Cb cb) {
+        if (name == null || name.isEmpty()) {
+            cb.done(null);
+            return;
+        }
+        load("f:" + name, cb, () -> {
+            loadIndex();   // learns which game copy this is, so the file lands in the right place
+            File f = new File(dir, "f_" + name.replaceAll("[^A-Za-z0-9._-]", "_") + ".png");
+            byte[] png = f.isFile() ? readFile(f) : null;
+            if (png == null) {
+                png = fetch("/api/art/floor?n=" + URLEncoder.encode(name, "UTF-8"));
+                if (png != null) writeFile(f, png);
+            }
+            return png == null ? null : BitmapFactory.decodeByteArray(png, 0, png.length);
+        });
+    }
+
     Bitmap peek(String kind, String name) {
         return memory.get(kind + ":" + name);
     }

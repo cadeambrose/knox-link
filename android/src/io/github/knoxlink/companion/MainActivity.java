@@ -884,6 +884,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     private View buildMap() {
         FrameLayout f = new FrameLayout(this);
         map = new MapView(this);
+        map.setArt(art);   // the game's own floors, for the floor plan
         map.setStyle(!"dark".equals(prefs.getString("map", "paper")));
         map.setLabels(prefs.getBoolean("labels", true));
         map.setListener(new MapView.Listener() {

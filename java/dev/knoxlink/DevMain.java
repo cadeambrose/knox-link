@@ -790,6 +790,30 @@ public final class DevMain {
         return 0;
     }
 
+    // the floors of the house and around it (the game's own, by sprite: Plan.java's "fl"/"f")
+    static String floorOf(int i, int j) {
+        String rm = room(i, j);
+        switch (rm) {
+            case "living": return "floors_interior_tilesandwood_01_42";
+            case "kitchen": return "floors_interior_tilesandwood_01_0";
+            case "bedroom": return "floors_interior_carpet_01_3";
+            case "bathroom": return "floors_interior_tilesandwood_01_25";
+            case "hall": return "floors_interior_tilesandwood_01_45";
+            default: break;
+        }
+        if (i >= -2 && i <= -1 && j >= 1 && j <= 3) return "floors_interior_tilesandwood_01_40";   // the porch
+        if (j >= 16 && j <= 21) return "blends_street_01_0";                                    // the road
+        if (i >= -2 && i <= 0 && j >= 4 && j <= 15) return "blends_natural_01_0";               // the path to it
+        return "blends_natural_01_16";
+    }
+
+    // what stands where (from the house's corner), for "o": {i, j, kind, facing 0 N 1 E 2 S 3 W}
+    static final int[][] PIECES = {
+            {1, 0, 2, 2}, {2, 0, 2, 2}, {3, 0, 2, 2}, {2, 1, 4, 0}, {4, 3, 14, 0}, {6, 0, 11, 2}, {0, 3, 3, 1},
+            {8, 0, 5, 2}, {9, 0, 6, 2}, {11, 0, 5, 2}, {12, 0, 10, 3}, {12, 1, 9, 3}, {10, 2, 4, 0}, {11, 2, 4, 0},
+            {0, 6, 1, 1}, {1, 6, 1, 1}, {0, 7, 1, 1}, {1, 7, 1, 1}, {4, 4, 12, 3}, {3, 7, 12, 0},
+            {5, 4, 6, 2}, {7, 4, 7, 2}, {6, 7, 8, 0}, {7, 7, 8, 0}, {8, 7, 11, 0}};
+
     /** "plan" around the character: the house and its garden are known by heart; beyond the fence, what's around them. */
     static String plan(double px, double py) {
         int r = 24, block = 8, n = 2 * r + block;
@@ -804,6 +828,8 @@ public final class DevMain {
             }
         }
         byte[] out = new byte[n * n * 3];
+        byte[] floors = new byte[n * n], things = new byte[n * n];
+        List<String> names = new ArrayList<>();
         for (int j = 0; j < n; j++) {
             for (int i = 0; i < n; i++) {
                 int k = j * n + i, hi = x0 + i - HX, hj = y0 + j - HY;
@@ -818,13 +844,27 @@ public final class DevMain {
                     else if (hi >= -2 && hi <= -1 && hj >= 1 && hj <= 3) b |= 4;   // the porch
                     for (int[] th : THINGS) if (th[0] == hi && th[1] == hj) b |= th[2];
                     out[k * 3] = (byte) b;
+                    String fl = floorOf(hi, hj);
+                    int idx = names.indexOf(fl);
+                    if (idx < 0) {
+                        names.add(fl);
+                        idx = names.size() - 1;
+                    }
+                    floors[k] = (byte) (idx + 1);
+                    for (int[] pc : PIECES) if (pc[0] == hi && pc[1] == hj) things[k] = (byte) (pc[2] | pc[3] << 5);
                 }
                 // an edge only when a square on either side of it has been seen
                 if (seen[k] || (j > 0 && seen[k - n])) out[k * 3 + 1] = (byte) edge(hi, hj, true);
                 if (seen[k] || (i > 0 && seen[k - 1])) out[k * 3 + 2] = (byte) edge(hi, hj, false);
             }
         }
-        return "{\"x\":" + x0 + ",\"y\":" + y0 + ",\"z\":0,\"w\":" + n + ",\"h\":" + n + ",\"c\":\"" + Base64.getEncoder().encodeToString(out) + "\"}";
+        StringBuilder fl = new StringBuilder();
+        for (String s : names) fl.append(fl.length() > 0 ? "," : "").append('"').append(s).append('"');
+        // the car out front, in sight once the character is out of the house (red, facing south down the road)
+        String cars = Math.hypot(HX + 19.5 - px, HY + 4.5 - py) < 24 ? "[[" + (HX + 19.5) + "," + (HY + 4.5) + ",90,4.6,1.9,\"a8322a\"]]" : "[]";
+        return "{\"x\":" + x0 + ",\"y\":" + y0 + ",\"z\":0,\"w\":" + n + ",\"h\":" + n + ",\"c\":\"" + Base64.getEncoder().encodeToString(out)
+                + "\",\"fl\":[" + fl + "],\"f\":\"" + Base64.getEncoder().encodeToString(floors) + "\",\"o\":\""
+                + Base64.getEncoder().encodeToString(things) + "\",\"v\":" + cars + "}";
     }
 
     // ------------------------------------------------------------------ what the character remembers (Memory.java)
