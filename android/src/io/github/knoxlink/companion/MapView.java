@@ -434,8 +434,8 @@ final class MapView extends View {
             } else {
                 // a handwritten note, like the game's own map notes
                 notePaint.setTextAlign(Paint.Align.CENTER);
-                notePaint.setTypeface(Typeface.create("casual", Typeface.BOLD));
-                notePaint.setTextSize(14 * density * zoomFit);
+                notePaint.setTypeface(Fonts.hand(true));
+                notePaint.setTextSize(14 * density * zoomFit * (Fonts.caveat() ? Fonts.HAND_SCALE : 1f));
                 String text = m.optString("text");
                 notePaint.setStyle(Paint.Style.STROKE);
                 notePaint.setStrokeWidth(3 * density);
@@ -543,8 +543,8 @@ final class MapView extends View {
             float d;
             if (m.has("text")) {
                 // a note: inside its own text box (as drawn), with a little room around it
-                notePaint.setTypeface(Typeface.create("casual", Typeface.BOLD));
-                notePaint.setTextSize(14 * density * zoomFit);
+                notePaint.setTypeface(Fonts.hand(true));
+                notePaint.setTextSize(14 * density * zoomFit * (Fonts.caveat() ? Fonts.HAND_SCALE : 1f));
                 float hw = notePaint.measureText(m.optString("text")) / 2 + 6 * density;
                 float hh = notePaint.getTextSize() / 2 + 6 * density;
                 float dx = Math.max(0, Math.abs(px - mx) - hw), dy = Math.max(0, Math.abs(py - my) - hh);

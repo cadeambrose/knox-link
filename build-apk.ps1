@@ -40,10 +40,18 @@ Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 & "$bt\d8.bat" --release --min-api 26 --lib $androidJar --output "$out\dex" $classesJar
 if ($LASTEXITCODE -ne 0) { throw 'd8 failed' }
 
-# 3. add classes.dex, align, sign
+# 3. add classes.dex and the assets (the game's fonts with their licence texts), align, sign.
+# The assets go in by hand: aapt2's -A on Windows names them with backslashes, which Android can't find.
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::Open("$out\base.apk", 'Update')
 [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, "$out\dex\classes.dex", 'classes.dex') | Out-Null
+$assets = Join-Path $Root 'android\assets'
+if (Test-Path $assets) {
+    Get-ChildItem $assets -Recurse -File | ForEach-Object {
+        $name = 'assets/' + $_.FullName.Substring($assets.Length + 1).Replace('\', '/')
+        [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $name) | Out-Null
+    }
+}
 $zip.Dispose()
 & "$bt\zipalign.exe" -p -f 4 "$out\base.apk" "$out\aligned.apk"
 if ($LASTEXITCODE -ne 0) { throw 'zipalign failed' }

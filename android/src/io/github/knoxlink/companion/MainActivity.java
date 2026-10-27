@@ -2107,7 +2107,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             else if (wx.optDouble("rain") > 0.1) { icon = "rain"; word = wx.optDouble("rain") > 0.6 ? "Heavy rain" : "Rain"; }
             else if (wx.optDouble("fog") > 0.35) { icon = "fog"; word = "Fog"; }
             else if (wx.optDouble("cloud") > 0.6) { icon = "cloud"; word = "Cloudy"; }
-            else { icon = night ? "moon" : "sun"; word = night ? "Clear night" : "Clear"; }
+            else { icon = night ? "moon" : "sun"; word = night ? "Clear night" : wx.optDouble("cloud") > 0.3 ? "Partly cloudy" : "Clear"; }
             // the game's own weather pictures where it has one (UI2.pack), the plain icon otherwise
             String[] layers = "storm".equals(icon) || "rain".equals(icon) ? new String[]{"Weather_Cloud_Heavy", "Weather_Rain"}
                     : "cloud".equals(icon) ? new String[]{"Weather_Cloud_Heavy"}

@@ -68,7 +68,7 @@ final class KeyboardView extends View {
         this.t = t;
         this.listener = listener;
         text.setTextAlign(Paint.Align.CENTER);
-        text.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        text.setTypeface(t.pz ? Fonts.ui(false) : Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         setClickable(true);
     }
 

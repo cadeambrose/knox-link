@@ -169,7 +169,7 @@ final class Widgets {
             p.setStyle(Paint.Style.FILL);
             p.setTextAlign(Paint.Align.CENTER);
             p.setColor(t.text);
-            p.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            p.setTypeface(t.bold());
             p.setTextSize(size * 0.26f);
             c.drawText(speed, cx, cy + size * 0.06f, p);
             p.setColor(t.text3);

@@ -382,7 +382,7 @@ function weatherOf(c) {
   if (wx.rain > 0.1) return ['rain', wx.rain > 0.6 ? 'Heavy rain' : 'Rain'];
   if (wx.fog > 0.35) return ['fog', 'Fog'];
   if (wx.cloud > 0.6) return ['cloud', 'Cloudy'];
-  return night ? ['moon', 'Clear night'] : ['sun', 'Clear'];
+  return night ? ['moon', 'Clear night'] : ['sun', wx.cloud > 0.3 ? 'Partly cloudy' : 'Clear'];
 }
 
 // The game's weather pictures are 43x43 layers meant to be drawn over each other (its season.lua drew rain as
@@ -1097,4 +1097,6 @@ function start() {
   connect();
 }
 
+// The map writes its notes in the game's handwriting on a canvas, which never asks for a font by itself.
+if (document.fonts) document.fonts.load('700 16px Caveat').catch(() => {});
 start();

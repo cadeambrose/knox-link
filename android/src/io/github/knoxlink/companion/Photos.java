@@ -126,7 +126,7 @@ final class Photos {
             String cap = p.optString("c", "");
             if (!cap.isEmpty()) {
                 TextView ct = Ui.ellipsize(Ui.text(c, t, cap, 11.5f, 0xFF4A4235, false));
-                ct.setTypeface(android.graphics.Typeface.create("casual", android.graphics.Typeface.NORMAL));
+                Fonts.handwrite(ct, false);
                 ct.setMaxWidth(t.dp(150));
                 cell.addView(ct, Ui.margins(Ui.lp(t.dp(150), -2), 0, t.dp(4), 0, 0));
             }

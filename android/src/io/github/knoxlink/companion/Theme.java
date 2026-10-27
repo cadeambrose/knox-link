@@ -27,6 +27,7 @@ final class Theme {
     private Theme(Context ctx, String name, float textScale, int... c) {
         this.ctx = ctx;
         this.name = name;
+        Fonts.init(ctx);
         // The layout is designed for about 600x520 dp; smaller screens (a handheld's second
         // screen) scale everything down a little, larger ones a little up, so it always fits.
         android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
@@ -75,24 +76,17 @@ final class Theme {
         return v * textScale;
     }
 
-    // The game writes everything in Noto Sans SemiBold; the system's sans at weights 500/600 is the closest
-    // it has (one place to change when the game's fonts come with the app).
-    private static Typeface weighted(int weight, int fallbackStyle) {
-        Typeface base = Typeface.create("sans-serif", Typeface.NORMAL);
-        if (android.os.Build.VERSION.SDK_INT >= 28) return Typeface.create(base, weight, false);
-        return weight >= 600 ? Typeface.create("sans-serif-medium", fallbackStyle) : Typeface.create("sans-serif-medium", Typeface.NORMAL);
-    }
-
+    // The game writes everything in Noto Sans SemiBold (Fonts: shipped with the app); headings get its Bold.
     Typeface bold() {
-        return pz ? weighted(650, Typeface.BOLD) : Typeface.create("sans-serif", Typeface.BOLD);
+        return pz ? Fonts.ui(true) : Typeface.create("sans-serif", Typeface.BOLD);
     }
 
     Typeface medium() {
-        return pz ? weighted(600, Typeface.NORMAL) : Typeface.create("sans-serif-medium", Typeface.NORMAL);
+        return pz ? Fonts.ui(false) : Typeface.create("sans-serif-medium", Typeface.NORMAL);
     }
 
     Typeface regular() {
-        return pz ? weighted(500, Typeface.NORMAL) : Typeface.create("sans-serif", Typeface.NORMAL);
+        return pz ? Fonts.ui(false) : Typeface.create("sans-serif", Typeface.NORMAL);
     }
 
     /** A filled shape; in the game's look every corner is square (only circles, from {@link #circle}, stay round). */

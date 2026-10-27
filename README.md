@@ -166,3 +166,9 @@ docs/                  the AYN Thor setup guide and the screenshots
 ## License
 
 MIT. See `LICENSE`.
+
+The app ships the fonts the game itself uses, under the SIL Open Font License 1.1 (licence texts next to the
+fonts in `android/assets/fonts` and `web/fonts`): Noto Sans SemiBold and Bold (The Noto Project Authors) and
+Caveat (The Caveat Project Authors). The game's pictures the apps show (icons, map, moodles, UI art) are read at
+run time from your own copy of the game; none of them are in this repository. Knox Link is a fan-made mod, not
+made or endorsed by The Indie Stone.

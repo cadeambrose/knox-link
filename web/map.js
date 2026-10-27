@@ -56,7 +56,8 @@ const KnoxMap = (() => {
       player: '#f2a93b', wp: '#f2a93b',
     },
   };
-  const HAND = '"Segoe Print", "Bradley Hand", "Comic Sans MS", casual, "Coming Soon", cursive';
+  // the game's handwriting (Caveat, shipped with the app), a little larger: it is small for its size
+  const HAND = 'Caveat, "Segoe Print", "Bradley Hand", "Comic Sans MS", casual, "Coming Soon", cursive', HAND_SCALE = 1.22;
 
   let canvas, ctx, dpr = 1, W = 0, H = 0;
   let pal = PALETTES.paper, styleName = 'paper';
@@ -434,7 +435,7 @@ const KnoxMap = (() => {
         }
       } else if (m.text) {
         // a handwritten note, like the game's own map notes
-        const fs = 14 * zoomFit;
+        const fs = 14 * zoomFit * HAND_SCALE;
         ctx.font = `700 ${fs.toFixed(1)}px ${HAND}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1240,7 +1241,7 @@ const KnoxMap = (() => {
     // a small marker tapped squarely wins over the writing around it
     if (hit && best < 12) return hit;
     // notes are wide: a tap on (or just beside) the writing counts
-    const fs = 14 * Math.max(0.75, Math.min(1.3, Math.sqrt(view.s)));
+    const fs = 14 * Math.max(0.75, Math.min(1.3, Math.sqrt(view.s))) * HAND_SCALE;
     ctx.font = `700 ${fs.toFixed(1)}px ${HAND}`;
     for (const m of marks) {
       if (!m.text) continue;

@@ -136,13 +136,13 @@ final class Diaries {
             book.addView(head);
             if (!text.isEmpty()) {
                 TextView prose = Ui.text(c, t, text, 15.5f, INK, false);
-                prose.setTypeface(Typeface.create("casual", Typeface.NORMAL));
+                Fonts.handwrite(prose, false);
                 prose.setLineSpacing(t.dp(3), 1f);
                 book.addView(prose, Ui.margins(Ui.lp(-1, -2), 0, t.dp(8), 0, 0));
             }
             for (int k = 0; notes != null && k < notes.length(); k++) {
                 TextView note = Ui.text(c, t, notes.optString(k), 15.5f, PEN, false);
-                note.setTypeface(Typeface.create("casual", Typeface.BOLD));
+                Fonts.handwrite(note, true);
                 book.addView(note, Ui.margins(Ui.lp(-1, -2), 0, t.dp(8), 0, 0));
             }
             if (ph != null && ph.length() > 0) book.addView(Photos.strip(c, host, ph, false), Ui.margins(Ui.lp(-1, -2), 0, t.dp(10), 0, 0));

@@ -88,8 +88,8 @@ final class Journal extends ScrollView implements AiWriter.Listener {
         input.setHint("Write in your journal…");
         input.setHintTextColor(INK_SOFT);
         input.setTextColor(PEN);
-        input.setTypeface(Typeface.create("casual", Typeface.BOLD));
-        input.setTextSize(t.sp(16));
+        input.setTypeface(Fonts.hand(true));
+        input.setTextSize(t.sp(Fonts.caveat() ? 16 * Fonts.HAND_SCALE : 16));
         input.setBackground(null);
         input.setMinLines(2);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
@@ -195,7 +195,7 @@ final class Journal extends ScrollView implements AiWriter.Listener {
         boolean hasEntry = !entry.isEmpty();
         if (hasEntry) {
             TextView prose = Ui.text(c, t, entry, 15.5f, INK, false);
-            prose.setTypeface(Typeface.create("casual", Typeface.NORMAL));
+            Fonts.handwrite(prose, false);
             prose.setLineSpacing(t.dp(3), 1f);
             if (ai && hasFacts(p)) prose.setOnLongClickListener(v -> { rewriteSheet(d); return true; });
             page.addView(prose, Ui.lp(-1, -2));
@@ -251,7 +251,7 @@ final class Journal extends ScrollView implements AiWriter.Listener {
             JSONObject n = notes.optJSONObject(i);
             if (n == null) continue;
             TextView note = Ui.text(c, t, n.optString("s"), 16, PEN, false);
-            note.setTypeface(Typeface.create("casual", Typeface.BOLD));
+            Fonts.handwrite(note, true);
             note.setLineSpacing(t.dp(2), 1f);
             final int idx = i + 1;
             note.setOnLongClickListener(v -> { confirmDelete(d, idx); return true; });

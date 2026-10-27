@@ -517,7 +517,7 @@ final class KnoxServer {
             }
             byte[] gz = null;
             String type = contentType(path);
-            if (type.startsWith("text/") || type.contains("javascript") || type.contains("json") || type.contains("svg")) {
+            if (type.startsWith("text/") || type.contains("javascript") || type.contains("json") || type.contains("svg") || type.equals("font/ttf")) {
                 ByteArrayOutputStream bo = new ByteArrayOutputStream();
                 try (GZIPOutputStream g = new GZIPOutputStream(bo)) {
                     g.write(plain);
@@ -561,6 +561,8 @@ final class KnoxServer {
         if (p.endsWith(".png")) return "image/png";
         if (p.endsWith(".ico")) return "image/x-icon";
         if (p.endsWith(".woff2")) return "font/woff2";
+        if (p.endsWith(".ttf")) return "font/ttf";
+        if (p.endsWith(".txt")) return "text/plain; charset=utf-8";
         return "application/octet-stream";
     }
 
