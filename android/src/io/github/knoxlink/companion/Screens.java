@@ -1648,8 +1648,16 @@ final class Screens {
             }
             JSONArray acts = Json.arr(it.opt("a"));
             int n = 0;
+            if (it.has("lg")) {
+                // a diary someone left behind: read here, page by page
+                TextView rd = Ui.action(c, t, "book", "Read the diary");
+                rd.setOnClickListener(v -> { host.closeSheet(); Diaries.read(host, it.optString("lg")); });
+                sheet.addView(rd, Ui.margins(Ui.lp(-1, -2), 0, 0, 0, t.dp(8)));
+                n++;
+            }
             for (int i = 0; i < acts.length(); i++) {
                 String a = acts.optString(i);
+                if (a.equals("read") && it.has("lg")) continue;
                 if (a.equals("eat") || a.equals("drink")) {
                     boolean eat = a.equals("eat");
                     sheet.addView(Ui.text(c, t, eat ? "Eat" : "Drink", 14, t.text2, true), Ui.margins(Ui.lp(-2, -2), t.dp(2), n > 0 ? t.dp(6) : 0, 0, t.dp(8)));

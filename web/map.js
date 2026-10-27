@@ -1,14 +1,18 @@
 /* Knox Link map: draws the game's own vector world map (converted by the mod) in the style of the
    in-game paper map, with a tile cache so panning and zooming stay smooth on a phone or a
-   handheld's second screen. On top: fog of war, the player's own map marks, other survivors,
-   the base, the waypoint and the player. */
+   handheld's second screen. On top: fog of war, the floor plan around the character when zoomed
+   all the way in, what the character remembers (searched buildings, the car they left, the way
+   they walked, "Where did I see...?" finds), the player's own map marks, other survivors, the base,
+   the waypoint, the zombies the danger radar knows of and the player. */
 'use strict';
 
 const KnoxMap = (() => {
   const CELL = 300;
   const TILE = 256;                 // css px per cached tile
   const MAX_TILES = 110;
-  const MIN_SCALE = 1 / 48, MAX_SCALE = 10;   // css px per world square
+  // css px per world square; all the way in: the floor plan, a square a finger wide
+  const MIN_SCALE = 1 / 48, MAX_SCALE = 44;
+  const PLAN_ZOOM = 5;              // from here in, the floor plan shows (it fades in a little before)
 
   // feature kinds (must match MapData.java)
   const K = { WATER: 1, FOREST: 2, PRIMARY: 3, SECONDARY: 4, TERTIARY: 5, TRAIL: 6, RAIL: 7,
@@ -68,6 +72,11 @@ const KnoxMap = (() => {
   let paperImg = null, paperPattern = null;
   let fog = null;                   // { unit, w, h, bits, canvas }
   let dark = false;
+  let plan = null, planWanted = false;   // the floor plan: { x, y, w, h, c = 3 bytes a square }
+  let zeds = [];                    // the radar's zombies on the map: { x, y, kind (0 seen, 1 heard, 2 lost), hot }
+  let stamps = [];                  // buildings the character went into: [x, y, w, h, searched 0..100]
+  let car = null, trail = [], showTrail = false;
+  let pins = [], focusPin = -1;     // "Where did I see...?" finds, and the one shown big
   let dirty = true;
   let callbacks = {};
   const tiles = new Map();          // key -> {canvas, done, job}
@@ -548,6 +557,298 @@ const KnoxMap = (() => {
     ctx.restore();
   }
 
+  function disc(x, y, r) {
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(0, r), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // ------------------------------------------------------------------ the floor plan
+
+  // edges, as Plan.java on the server sends them
+  const E_WALL = 1, E_DOOR = 2, E_DOOR_OPEN = 3, E_WINDOW = 4, E_WINDOW_OPEN = 5, E_WINDOW_BROKEN = 6,
+    E_FENCE = 7, E_DOORWAY = 8, E_FRAME = 9;
+
+  /** Zoomed in far enough for the floor plan (or out of it again): the screen asks the game for it, or stops. */
+  function checkPlanWanted() {
+    const want = view.s >= PLAN_ZOOM * 0.7;
+    if (want === planWanted) return;
+    planWanted = want;
+    callbacks.onPlanWanted && callbacks.onPlanWanted(want);
+  }
+
+  function line(color, width, x0, y0, x1, y1) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+
+  /** What the character has seen of their floor around them: the ground, furniture, stairs, then the walls. */
+  function drawPlan() {
+    const pl = plan, u = view.s;   // css px per square
+    if (!pl || u < PLAN_ZOOM * 0.7) return;
+    const [ax, ay] = screenToWorld(0, 0), [bx, by] = screenToWorld(W, H);
+    const i0 = Math.max(0, Math.floor(ax) - pl.x), i1 = Math.min(pl.w - 1, Math.floor(bx) - pl.x);
+    const j0 = Math.max(0, Math.floor(ay) - pl.y), j1 = Math.min(pl.h - 1, Math.floor(by) - pl.y);
+    if (i0 > i1 || j0 > j1) return;
+    const paper = !!pal.paper, c = pl.c, n = pl.w;
+    const inside = paper ? '#f1ebd6' : '#2b3036', outside = paper ? '#d9d3ba' : '#20242a';
+    const memory = paper ? '#e3dcc4' : '#24282e';   // seen before, not in view now
+    const furniture = paper ? '#b9a684' : '#4c5560', tree = paper ? '#7e9b5e' : '#3c5a3a';
+    const ink = { ink: paper ? '#2b2620' : '#d9dde3', door: paper ? '#8a5a2b' : '#c9925a', glass: paper ? '#4f7ea3' : '#7fb2dc', wood: paper ? '#6b4a2b' : '#b08a5e' };
+    const fade = Math.min(1, (u - PLAN_ZOOM * 0.7) / (PLAN_ZOOM * 0.3));
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.lineCap = 'butt';
+    // the ground the character has seen: brighter where it's in view now
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const b0 = c[(j * n + i) * 3];
+        if (!(b0 & 1)) continue;
+        const x = sx(pl.x + i), y = sy(pl.y + j);
+        ctx.fillStyle = !(b0 & 2) ? memory : (b0 & 8) ? inside : outside;
+        ctx.fillRect(x, y, u + 0.6, u + 0.6);
+        if (b0 & 128) {
+          ctx.fillStyle = tree;
+          disc(x + u / 2, y + u / 2, u * 0.38);
+        } else if (b0 & (32 | 64)) {
+          ctx.fillStyle = furniture;
+          const k = u * 0.12;
+          roundRect(x + k, y + k, u - 2 * k, u - 2 * k, u * 0.1);
+          ctx.fill();
+          if ((b0 & 64) && u > 14) {   // storage: a drawer line
+            ctx.globalAlpha = fade / 2;
+            line(ink.ink, Math.max(1, u * 0.05), x + u * 0.3, y + u * 0.5, x + u * 0.7, y + u * 0.5);
+            ctx.globalAlpha = fade;
+          }
+        }
+        if (b0 & 16) {   // stairs: treads
+          ctx.globalAlpha = fade * 2 / 3;
+          for (let s = 1; s < 4; s++) line(ink.ink, Math.max(1, u * 0.05), x + u * 0.15, y + u * s / 4, x + u * 0.85, y + u * s / 4);
+          ctx.globalAlpha = fade;
+        }
+      }
+    }
+    // walls, doors and windows on the squares' north and west edges
+    const wall = Math.max(2, u * 0.16);
+    for (let j = j0; j <= Math.min(pl.h - 1, j1 + 1); j++) {
+      for (let i = i0; i <= Math.min(n - 1, i1 + 1); i++) {
+        const k = (j * n + i) * 3;
+        const north = c[k + 1], west = c[k + 2];
+        if (!north && !west) continue;
+        const x = sx(pl.x + i), y = sy(pl.y + j);
+        if (north) edge(north, x, y, x + u, y, true, u, wall, ink);
+        if (west) edge(west, x, y, x, y + u, false, u, wall, ink);
+      }
+    }
+    ctx.restore();
+  }
+
+  function edge(code, x0, y0, x1, y1, north, u, wall, ink) {
+    const kind = code & 15;
+    const jam = u * 0.14;   // the wall stub either side of an opening
+    const gx0 = north ? x0 + jam : x0, gy0 = north ? y0 : y0 + jam, gx1 = north ? x1 - jam : x1, gy1 = north ? y1 : y1 - jam;
+    switch (kind) {
+      case E_WALL:
+        line(ink.ink, wall, x0, y0, x1, y1);
+        break;
+      case E_DOOR:
+      case E_DOOR_OPEN:
+      case E_DOORWAY:
+        // the frame's ends, then the door: closed across the gap, open swung into the square
+        line(ink.ink, wall, x0, y0, gx0, gy0);
+        line(ink.ink, wall, gx1, gy1, x1, y1);
+        if (kind === E_DOOR) line(ink.door, wall * 0.6, gx0, gy0, gx1, gy1);
+        else if (kind === E_DOOR_OPEN) {
+          const len = u - 2 * jam;
+          line(ink.door, wall * 0.45, gx0, gy0, north ? gx0 : gx0 + len, north ? gy0 + len : gy0);
+        }
+        break;
+      case E_WINDOW:
+      case E_WINDOW_OPEN:
+      case E_WINDOW_BROKEN:
+      case E_FRAME:
+        line(ink.ink, wall, x0, y0, gx0, gy0);
+        line(ink.ink, wall, gx1, gy1, x1, y1);
+        if (kind === E_WINDOW_BROKEN || kind === E_FRAME) {
+          ctx.setLineDash([u * 0.08, u * 0.08]);
+          line(kind === E_FRAME ? ink.ink : ink.glass, wall * 0.3, gx0, gy0, gx1, gy1);
+          ctx.setLineDash([]);
+        } else {
+          // a pane: two thin lines, apart when the window is open
+          const off = wall * (kind === E_WINDOW_OPEN ? 0.45 : 0.22);
+          const ox = north ? 0 : off, oy = north ? off : 0, pw = Math.max(1, wall * 0.22);
+          line(ink.glass, pw, gx0 - ox, gy0 - oy, gx1 - ox, gy1 - oy);
+          line(ink.glass, pw, gx0 + ox, gy0 + oy, gx1 + ox, gy1 + oy);
+        }
+        break;
+      case E_FENCE:
+        ctx.setLineDash([u * 0.12, u * 0.08]);
+        line(ink.ink, Math.max(1.5, wall * 0.35), x0, y0, x1, y1);
+        ctx.setLineDash([]);
+        break;
+      default:
+        break;
+    }
+    if (code & 16) {   // barricaded: planks across the opening
+      const px = north ? u * 0.18 : 0, py = north ? 0 : u * 0.18;
+      for (let s = 1; s <= 3; s++) {
+        const mx = x0 + (x1 - x0) * s / 4, my = y0 + (y1 - y0) * s / 4;
+        line(ink.wood, wall * 0.5, mx - py * 0.6 - px, my - px * 0.6 - py, mx + py * 0.6 + px, my + px * 0.6 + py);
+      }
+    }
+  }
+
+  /** The zombies the danger radar knows of, where it puts them around the character: seen solid, heard or lost a ring. */
+  function drawZombies() {
+    if (!zeds.length || view.s < 2) return;
+    const r = Math.max(4.5, Math.min(view.s * 0.32, 11));
+    for (const z of zeds) {
+      const x = sx(z.x), y = sy(z.y);
+      if (x < -20 || y < -20 || x > W + 20 || y > H + 20) continue;
+      const color = z.hot ? '#e0352b' : z.kind === 0 ? '#c0392b' : z.kind === 1 ? '#e08a2b' : '#8a8f96';
+      ctx.fillStyle = pal.paper ? '#ffffff' : '#0d0f12';
+      disc(x, y, r + 2);
+      if (z.kind === 0) {
+        ctx.fillStyle = color;
+        disc(x, y, r);
+      } else {
+        ctx.lineWidth = 2.2;
+        ctx.strokeStyle = color;
+        ctx.beginPath(); ctx.arc(x, y, r - 1, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ what the character remembers
+
+  const SEARCHED = '#3e7c47', CAR = '#2f5d8a', PIN = '#8b3fb0';
+
+  /** How searched the building at a spot is (0..100), or -1 when the character hasn't been in it. */
+  function searchedAt(wx, wy) {
+    for (const [x, y, w, h, s] of stamps) {
+      if (wx >= x && wy >= y && wx < x + w && wy < y + h) return s;
+    }
+    return -1;
+  }
+
+  /** A green tick on each building searched, a slice for one searched in part. */
+  function drawStamps() {
+    const z = view.s;
+    if (!stamps.length || z < 0.55 || z >= PLAN_ZOOM) return;
+    const r = 8 * Math.max(0.85, Math.min(1.3, Math.sqrt(z)));
+    for (const [bx, by, bw, bh, s] of stamps) {
+      if (s <= 0) continue;
+      const x = sx(bx + bw / 2), y = sy(by + bh / 2);
+      if (x < -20 || y < -20 || x > W + 20 || y > H + 20) continue;
+      ctx.fillStyle = pal.paper ? '#ffffff' : '#0d0f12';
+      disc(x, y, r + 2);
+      if (s >= 80) {
+        ctx.fillStyle = SEARCHED;
+        disc(x, y, r);
+        ctx.beginPath();
+        ctx.moveTo(x - r * 0.45, y + r * 0.02);
+        ctx.lineTo(x - r * 0.1, y + r * 0.38);
+        ctx.lineTo(x + r * 0.5, y - r * 0.32);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 2.2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+      } else {
+        // partly searched: how much, as a slice
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = SEARCHED;
+        ctx.beginPath(); ctx.arc(x, y, r - 1, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = SEARCHED;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.arc(x, y, r - 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * s / 100);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  /** The car the character left: a little car, from the side, in a blue disc. */
+  function drawCar() {
+    if (!car || view.s < 0.3) return;
+    const x = sx(Number(car.x) + 0.5), y = sy(Number(car.y) + 0.5);
+    if (x < -60 || y < -60 || x > W + 60 || y > H + 60) return;
+    const r = 11;
+    ctx.fillStyle = pal.paper ? '#ffffff' : '#0d0f12';
+    disc(x, y, r + 2.5);
+    ctx.fillStyle = CAR;
+    disc(x, y, r);
+    ctx.fillStyle = '#ffffff';
+    roundRect(x - r * 0.62, y - r * 0.08, r * 1.24, r * 0.4, r * 0.12);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.36, y - r * 0.08);
+    ctx.lineTo(x - r * 0.2, y - r * 0.38);
+    ctx.lineTo(x + r * 0.22, y - r * 0.38);
+    ctx.lineTo(x + r * 0.4, y - r * 0.08);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = CAR;
+    disc(x - r * 0.34, y + r * 0.34, r * 0.15);
+    disc(x + r * 0.34, y + r * 0.34, r * 0.15);
+    if (view.s > 0.45) drawTag(String(car.n || 'Your car'), x, y + r * 2.1, CAR);
+  }
+
+  /** The way the character walked, dotted in the player's colour (off unless the map key turns it on). */
+  function drawTrail() {
+    if (!showTrail || trail.length < 4 || view.s < 0.2) return;
+    ctx.save();
+    ctx.globalAlpha = 140 / 255;
+    ctx.strokeStyle = pal.player;
+    ctx.lineWidth = 2.2;
+    ctx.setLineDash([2, 4]);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sx(trail[0] + 0.5), sy(trail[1] + 0.5));
+    for (let i = 2; i + 1 < trail.length; i += 2) ctx.lineTo(sx(trail[i] + 0.5), sy(trail[i + 1] + 0.5));
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPins() {
+    pins.forEach((o, i) => { if (i !== focusPin) drawPin(o, false); });
+    if (focusPin >= 0 && focusPin < pins.length) drawPin(pins[focusPin], true);
+  }
+
+  function drawPin(o, big) {
+    if (!o) return;
+    const x = sx(Number(o.x) + 0.5), y = sy(Number(o.y) + 0.5);
+    if (x < -60 || y < -60 || x > W + 60 || y > H + 60) return;
+    const r = big ? 11 : 7;
+    ctx.fillStyle = pal.paper ? '#ffffff' : '#0d0f12';
+    disc(x, y, r + 2.5);
+    ctx.fillStyle = PIN;
+    disc(x, y, r);
+    ctx.fillStyle = '#ffffff';
+    disc(x, y, r * 0.38);
+    if (big) {
+      const c = Number(o.c) || 1;
+      drawTag(c > 1 ? `${o.n} ×${c}` : String(o.n || ''), x, y + r * 2.2, PIN);
+    }
+  }
+
   function frame() {
     requestAnimationFrame(frame);
     if (!canvas || !W) return;
@@ -579,12 +880,18 @@ const KnoxMap = (() => {
     ctx.fillRect(0, 0, W, H);
     if (data) drawTiles();
     drawFog();
+    drawPlan();
     drawPaper();
-    if (data) drawLabels();
+    if (data && view.s < PLAN_ZOOM) drawLabels();
+    drawTrail();
+    drawStamps();
     drawMarks();
     drawBase();
+    drawCar();
     drawWaypoint();
     drawTeam();
+    drawPins();
+    drawZombies();
     drawPlayer();
     if (dark) { ctx.fillStyle = 'rgba(5,6,7,.9)'; ctx.fillRect(0, 0, W, H); }
   }
@@ -611,6 +918,7 @@ const KnoxMap = (() => {
       view.cx = wx - (px - W / 2) / ns;
       view.cy = wy - (py - H / 2) / ns;
     }
+    checkPlanWanted();
     dirty = true;
   }
 
@@ -634,7 +942,7 @@ const KnoxMap = (() => {
     return null;
   }
 
-  /** The mark, survivor or base under a tap, or null. */
+  /** The mark, survivor, base, car left behind or "Where did I see...?" find under a tap, or null. */
   function thingAt(px, py) {
     let best = 22, hit = null;
     for (const m of team) {
@@ -644,6 +952,14 @@ const KnoxMap = (() => {
     if (base && base.x != null) {
       const d = Math.hypot(sx(base.x + 0.5) - px, sy(base.y + 0.5) - py);
       if (d < best) { best = d; hit = { kind: 'base', thing: base }; }
+    }
+    if (car && view.s >= 0.3) {
+      const d = Math.hypot(sx(Number(car.x) + 0.5) - px, sy(Number(car.y) + 0.5) - py);
+      if (d < best) { best = d; hit = { kind: 'car', thing: car }; }
+    }
+    for (const o of pins) {
+      const d = Math.hypot(sx(Number(o.x) + 0.5) - px, sy(Number(o.y) + 0.5) - py);
+      if (d < best) { best = d; hit = { kind: 'seen', thing: o }; }
     }
     const reach = Math.max(best, markSize() * 0.7);
     for (const m of marks) {
@@ -732,7 +1048,15 @@ const KnoxMap = (() => {
               callbacks.onThing && callbacks.onThing(hit.kind, hit.thing);
             } else {
               const [wx, wy] = screenToWorld(press.x, press.y);
-              callbacks.onBuilding && callbacks.onBuilding(fogged(wx, wy) || dark ? null : hitBuilding(wx, wy));
+              let b = fogged(wx, wy) || dark ? null : hitBuilding(wx, wy);
+              if (b) {
+                // what the character remembers of it
+                const s = searchedAt(wx, wy);
+                if (s >= 80) b += ' · searched';
+                else if (s > 0) b += ` · ${s}% searched`;
+                else if (s === 0) b += ' · been inside';
+              }
+              callbacks.onBuilding && callbacks.onBuilding(b);
             }
           }
         }
@@ -861,6 +1185,57 @@ const KnoxMap = (() => {
       dirty = true;
     },
     isPaper: () => !!pal.paper,
+    /** The floor plan around the character ("plan": x, y, z, w, h, c = base64, 3 bytes a square: see Plan.java). */
+    setPlan(d) {
+      plan = null;
+      if (d && d.c) {
+        try {
+          const raw = atob(String(d.c));
+          const c = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) c[i] = raw.charCodeAt(i);
+          const w = Number(d.w) || 0, h = Number(d.h) || 0;
+          if (w > 0 && h > 0 && c.length >= w * h * 3) plan = { x: Number(d.x) || 0, y: Number(d.y) || 0, w, h, c };
+        } catch (e) { plan = null; }
+      }
+      if (view.s >= PLAN_ZOOM * 0.7) dirty = true;
+    },
+    /** Zoomed in far enough that the screen should follow the floor plan. */
+    planWanted: () => planWanted,
+    /** The zombies the danger radar knows of ("radar"), put on the map around the character (only their floor). */
+    setZombies(radar) {
+      zeds = [];
+      const list = radar && Array.isArray(radar.z) ? radar.z : [];
+      if (player) {
+        for (const o of list) {
+          if (!o || typeof o !== 'object' || Number(o.f)) continue;   // another floor
+          zeds.push({ x: player.x + (Number(o.x) || 0), y: player.y + (Number(o.y) || 0),
+            kind: o.s === 'seen' ? 0 : o.s === 'heard' ? 1 : 2, hot: o.b === 'attack' || o.b === 'chase' });
+        }
+      }
+      if (view.s >= 2) dirty = true;
+    },
+    /** The map's memory layer ("memory"): searched buildings, the car left behind, the way walked. */
+    setMemory(m) {
+      const b = m && Array.isArray(m.b) ? m.b : [];
+      stamps = b.filter(Array.isArray).map((r) => [Number(r[0]) || 0, Number(r[1]) || 0, Number(r[2]) || 0, Number(r[3]) || 0,
+        Math.round((Number(r[4]) || 0) * 100)]);
+      car = m && m.car && typeof m.car === 'object' && m.car.x != null ? m.car : null;
+      trail = m && Array.isArray(m.tr) ? m.tr.map(Number) : [];
+      dirty = true;
+    },
+    setTrailShown(on) { showTrail = !!on; dirty = true; },
+    /** "Where did I see...?" finds to pin on the map; focus: the one to make big (-1: none). */
+    setPins(list, focus) { pins = Array.isArray(list) ? list : []; focusPin = focus; dirty = true; },
+    /** Moves the view to a place (and stops following the character), zoomed in at least this far. */
+    focusOn(x, y, zoom) {
+      setFollow(false);
+      view.cx = x;
+      view.cy = y;
+      view.s = Math.max(view.s, Math.min(MAX_SCALE, zoom));
+      checkPlanWanted();
+      dirty = true;
+    },
+    searchedAt,
     /** Where a world square is on the canvas, in css px. */
     toScreen: (wx, wy) => [sx(wx), sy(wy)],
     setLabels(on) { showLabels = on; dirty = true; },

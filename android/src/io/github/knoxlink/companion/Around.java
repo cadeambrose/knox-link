@@ -245,6 +245,12 @@ final class Around extends ScrollView {
         head.addView(Ui.text(c, t, it.optString("n") + (cnt > 1 ? "  ×" + cnt : ""), 19, t.text, true), Ui.margins(Ui.weight(1), t.dp(14), 0, 0, 0));
         sheet.addView(head, Ui.margins(Ui.lp(-1, -2), 0, 0, 0, t.dp(6)));
         sheet.addView(Ui.text(c, t, "In " + cont.optString("n"), 13.5f, t.text3, false), Ui.margins(Ui.lp(-2, -2), 0, 0, 0, t.dp(14)));
+        if (it.has("lg")) {
+            // a diary someone left behind: it can be read where it lies
+            TextView rd = Ui.action(c, t, "book", "Read the diary");
+            rd.setOnClickListener(x -> { host.closeSheet(); Diaries.read(host, it.optString("lg")); });
+            sheet.addView(rd, Ui.margins(Ui.lp(-1, -2), 0, 0, 0, t.dp(8)));
+        }
         TextView one = Ui.action(c, t, "hand", cnt > 1 ? "Take one" : "Take");
         one.setOnClickListener(x -> { host.command("take", Ui.args("id", it.optLong("id")), "Taking"); host.closeSheet(); });
         sheet.addView(one, Ui.margins(Ui.lp(-1, -2), 0, 0, 0, t.dp(8)));

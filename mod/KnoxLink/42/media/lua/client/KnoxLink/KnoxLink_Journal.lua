@@ -225,7 +225,13 @@ local function page(player)
         if last and not last.fin then writeEntry(player, j, last, true) end
         last = { d = n, kills = 0, lines = {}, notes = {}, rev = 0 }
         table.insert(j.days, last)
-        while #j.days > MAX_DAYS do table.remove(j.days, 1) end
+        while #j.days > MAX_DAYS do
+            -- the oldest page goes, and its photos with it
+            local old = table.remove(j.days, 1)
+            for _, ph in ipairs(old.ph or {}) do
+                if KnoxLink_photoDelete and ph.id then KnoxLink_photoDelete(ph.id) end
+            end
+        end
         version = version + 1
     end
     last.lines = last.lines or {}
@@ -534,6 +540,72 @@ Events.OnCreatePlayer.Add(function(playerNum, player)
     readyAt = getTimestampMs() + 5000
     if player and playerNum == 0 then lastKills = player:getZombieKills() end
 end)
+
+-- ----------------------------------------------------------------------------- for the other parts
+
+--- This character's id (it tells their memory, photos and diary from another character's).
+function KL.journalId(player)
+    return journal(player).id
+end
+
+--- Who the character is ({first, full, job, jobLabel, tone, tags}) and their traits' names.
+function KL.whoIs(player)
+    return character(player), traitLabels(player)
+end
+
+--- The town on the world map around a place, or nil.
+KL.townAt = townAt
+
+--- The pages, and who wrote them, for the diary left behind (KnoxLink_Legacy); the last
+--- page's entry gets its last word first.
+function KL.journalOf(player)
+    local j = journal(player)
+    local last = j.days[#j.days]
+    if last and not last.fin then
+        local ok, err = pcall(writeEntry, player, j, last, true)
+        if not ok then KL.warn("journal", err) end
+    end
+    return j, character(player), traitLabels(player)
+end
+
+local MAX_PHOTOS = 12   -- a day
+
+--- Whether today's page has room for another photo.
+function KL.journalPhotoRoom(player)
+    local p = page(player)
+    return #(p.ph or {}) < MAX_PHOTOS
+end
+
+--- A photo on today's page (the scrapbook): ph = { {id, c = caption, h, mi, w}, ... }.
+function KL.journalPhoto(player, id, caption)
+    local p = page(player)
+    p.ph = p.ph or {}
+    if #p.ph >= MAX_PHOTOS then return false end
+    local h, mi, w = stamp(player)
+    table.insert(p.ph, { id = id, c = caption, h = h, mi = mi, w = w })
+    local line = caption and caption ~= "" and ("Took a photo: " .. caption .. ".") or "Took a photo."
+    local last = p.lines[#p.lines]
+    if not (last and last.k == "photo" and not caption) then
+        table.insert(p.lines, { k = "photo", s = line, h = h, mi = mi, w = w })
+        while #p.lines > MAX_LINES do table.remove(p.lines, 1) end
+    end
+    bump(p)
+    return true
+end
+
+--- Changes a photo's caption, or (caption == false) takes it off its page. Returns whether it was there.
+function KL.journalPhotoEdit(player, id, caption)
+    for _, p in ipairs(journal(player).days) do
+        for i, ph in ipairs(p.ph or {}) do
+            if ph.id == id then
+                if caption == false then table.remove(p.ph, i) else ph.c = caption end
+                version = version + 1
+                return true
+            end
+        end
+    end
+    return false
+end
 
 -- ----------------------------------------------------------------------------- screens
 

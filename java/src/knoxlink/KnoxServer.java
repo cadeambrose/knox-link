@@ -60,6 +60,26 @@ final class KnoxServer {
     private final AtomicInteger nextCommandId = new AtomicInteger(1);
     private final Map<String, int[]> failedPins = new ConcurrentHashMap<>();   // ip -> {count, lockedUntilSecond}
     private final Map<String, byte[][]> staticCache = new ConcurrentHashMap<>(); // path -> {plain, gzip}
+    /**
+     * Handed to a screen once it's in (hello): the HTTP requests for the character's own things
+     * (photos, the way they walked) carry it as k=, so they need the PIN like everything else.
+     */
+    private final String sessionKey = newKey();
+
+    private static String newKey() {
+        byte[] b = new byte[16];
+        new java.security.SecureRandom().nextBytes(b);
+        StringBuilder sb = new StringBuilder(32);
+        for (byte x : b) sb.append(String.format("%02x", x & 0xff));
+        return sb.toString();
+    }
+
+    private boolean keyOk(Socket s, String requestTarget) {
+        if (s.getInetAddress().isLoopbackAddress()) return true;
+        String k = query(requestTarget, "k");
+        return k != null && java.security.MessageDigest.isEqual(k.getBytes(StandardCharsets.UTF_8),
+                sessionKey.getBytes(StandardCharsets.UTF_8));
+    }
 
     static final class Command {
         final int id;
@@ -405,6 +425,30 @@ final class KnoxServer {
                 byte[] img = Avatar.png();
                 if (img != null) send(out, 200, "image/png", img, false, "Cache-Control: no-store\r\n");
                 else send(out, Avatar.available() ? 503 : 410, "text/plain", "no picture".getBytes(StandardCharsets.UTF_8), false, "Cache-Control: no-store\r\n");
+            } else if ("/api/photo".equals(path)) {
+                byte[] jpg = keyOk(s, parts[1]) ? Photo.get(query(parts[1], "id")) : null;
+                if (jpg == null) send(out, keyOk(s, parts[1]) ? 404 : 403, "text/plain", "no photo".getBytes(StandardCharsets.UTF_8), false, "Cache-Control: no-store\r\n");
+                else send(out, 200, "image/jpeg", jpg, false, "Cache-Control: private, max-age=86400\r\n");
+            } else if ("/api/trail".equals(path)) {
+                // the way a character walked, for their recap: {"id":..,"p":[x,y,x,y,...]}
+                if (!keyOk(s, parts[1])) {
+                    send(out, 403, "text/plain", "PIN first".getBytes(StandardCharsets.UTF_8), false, null);
+                } else {
+                    String id = query(parts[1], "id");
+                    int[] t = id == null || !id.matches("[A-Za-z0-9_-]{1,40}") ? null : Memory.trailOf(id);
+                    StringBuilder sb = new StringBuilder(t == null ? 32 : t.length * 6 + 32).append("{\"id\":").append(quote(id == null ? "" : id)).append(",\"p\":[");
+                    if (t != null) for (int i = 0; i < t.length; i++) sb.append(i == 0 ? "" : ",").append(t[i]);
+                    sb.append("]}");
+                    byte[] body = sb.toString().getBytes(StandardCharsets.UTF_8);
+                    if (gzipOk) {
+                        ByteArrayOutputStream gz = new ByteArrayOutputStream(body.length / 3 + 64);
+                        try (GZIPOutputStream g = new GZIPOutputStream(gz)) {
+                            g.write(body);
+                        }
+                        body = gz.toByteArray();
+                    }
+                    send(out, 200, "application/json", body, gzipOk, "Cache-Control: no-store\r\n");
+                }
             } else if ("/api/map/symbols".equals(path)) {
                 String defs;
                 try { defs = Marks.definitions(); } catch (Throwable t) { defs = "[]"; }
@@ -789,6 +833,7 @@ final class KnoxServer {
                             .append(",\"version\":").append(quote(VERSION))
                             .append(",\"local\":").append(local);
                     if (!ok) sb.append(",\"why\":").append(quote(why));
+                    else sb.append(",\"key\":").append(quote(sessionKey));
                     sb.append('}');
                     offerOnce(sb.toString());
                     if (ok) {

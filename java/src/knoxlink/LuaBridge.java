@@ -297,6 +297,101 @@ public final class LuaBridge {
         }
     }
 
+    // ------------------------------------------------------------------ floor plan and the character's memory
+
+    /** Publishes the floor plan around the character ("plan") if it changed; everything = immersion off. */
+    @LuaMethod(name = "KnoxLink_plan", global = true)
+    public static void plan(boolean everything) {
+        Plan.publish(everything);
+    }
+
+    /** Whose memory "Where did I see...?" keeps: the character's journal id. */
+    @LuaMethod(name = "KnoxLink_memoryFor", global = true)
+    public static void memoryFor(String id) {
+        try {
+            Memory.select(id);
+        } catch (Throwable t) {
+            failedOnce("memory (load)", t);
+        }
+    }
+
+    /** A container the game's loot window lists (label = its name there). */
+    @LuaMethod(name = "KnoxLink_memorySaw", global = true)
+    public static void memorySaw(Object container, String label) {
+        Memory.saw(container, label);
+    }
+
+    /** About once a second: the way walked and the building the character is in. */
+    @LuaMethod(name = "KnoxLink_memoryTick", global = true)
+    public static void memoryTick() {
+        Memory.tick();
+    }
+
+    /** The car the character just got out of. */
+    @LuaMethod(name = "KnoxLink_memoryCar", global = true)
+    public static void memoryCar(Object vehicle) {
+        Memory.car(vehicle);
+    }
+
+    /** Looks for things the character saw; the answer goes out once on "seen" with the screen's request number. */
+    @LuaMethod(name = "KnoxLink_memoryFind", global = true)
+    public static void memoryFind(String query, double req) {
+        try {
+            Memory.find(query, (int) req);
+        } catch (Throwable t) {
+            failedOnce("memory (find)", t);
+        }
+    }
+
+    /** Publishes the map's memory layer ("memory": searched buildings, the car, the way walked) if it changed. */
+    @LuaMethod(name = "KnoxLink_memoryOverlay", global = true)
+    public static void memoryOverlay() {
+        try {
+            Memory.overlay();
+        } catch (Throwable t) {
+            failedOnce("memory (map)", t);
+        }
+    }
+
+    /** Writes the memory to the save now (the game saves, or the character died). */
+    @LuaMethod(name = "KnoxLink_memorySave", global = true)
+    public static void memorySave() {
+        try {
+            Memory.saveNow();
+        } catch (Throwable t) {
+            failedOnce("memory (save)", t);
+        }
+    }
+
+    // ------------------------------------------------------------------ the scrapbook's photos
+
+    /** Books a photo of the game's screen for the next frame (saved as knoxlink/photos/<id>.jpg); nil, or why not. */
+    @LuaMethod(name = "KnoxLink_photo", global = true)
+    public static String photo(String id) {
+        try {
+            return Photo.take(id);
+        } catch (Throwable t) {
+            failedOnce("photo", t);
+            return "Could not take it";
+        }
+    }
+
+    /** Called before the game draws its UI (OnPreUIDraw): takes a booked photo. */
+    @LuaMethod(name = "KnoxLink_photoFrame", global = true)
+    public static void photoFrame() {
+        Photo.frame();
+    }
+
+    @LuaMethod(name = "KnoxLink_photoDelete", global = true)
+    public static boolean photoDelete(String id) {
+        try {
+            return Photo.delete(id);
+        } catch (Throwable t) {
+            failedOnce("delete photo", t);
+            return false;
+        }
+    }
+
     // ------------------------------------------------------------------ live character picture
 
     private static boolean tidsQueued;

@@ -49,6 +49,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             {"comms", "Radio", null, null, "radio"},
             {"base", "Base", null, null, "home"},
             {"journal", "Journal", null, null, "book"},
+            {"ask", "Ask", null, null, "ask"},
             {"car", "Car", null, null, "car"},
     };
 
@@ -79,7 +80,12 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     private Screens.Base baseScreen;
     private Screens.Settings settings;
     private Journal journal;
+    private AskScreen ask;
     private JSONObject lootData, craftData, journalData;
+    // the floor plan, what the character remembers, the diaries they found, "Ask"'s situation
+    private JSONObject planData, memoryData, diariesData, askData;
+    /** The game server's key for this session (hello): photos and the way walked need it, from another device. */
+    private String httpKey;
     private String forecastSig = "";
     private View followBtn;
 
@@ -500,6 +506,18 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     }
 
     @Override
+    public String apiUrl(String pathAndQuery) {
+        String key = httpKey == null || httpKey.isEmpty() ? "" : (pathAndQuery.contains("?") ? "&" : "?") + "k=" + httpKey;
+        return link.baseUrl() + pathAndQuery + key;
+    }
+
+    @Override
+    public void showOnMap(float x, float y, float zoom) {
+        setTab("map");
+        map.focusOn(x, y, zoom);
+    }
+
+    @Override
     public void openSheet(View contentView) {
         sheetPanel.removeAllViews();
         View grip = new View(this);
@@ -635,6 +653,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         comms = new Screens.Comms(this, this);
         baseScreen = new Screens.Base(this, this);
         journal = new Journal(this, this);
+        ask = new AskScreen(this, this);
         car = new Screens.Car(this, this);
         settings = new Screens.Settings(this, this, this);
         addScreen("vitals", vitals);
@@ -643,6 +662,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         addScreen("comms", comms);
         addScreen("base", baseScreen);
         addScreen("journal", journal);
+        addScreen("ask", ask);
         addScreen("car", car);
         addScreen("settings", settings);
         buildAlert();
@@ -665,6 +685,11 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         if (lootData != null) gear.loot(lootData);
         if (craftData != null) gear.craft(craftData);
         if (journalData != null) journal.journal(journalData);
+        if (diariesData != null) journal.diaries(diariesData);
+        if (askData != null) ask.situation(askData);
+        if (planData != null) map.setPlan(planData);
+        if (memoryData != null) map.setMemory(memoryData);
+        map.setTrailShown(prefs.getBoolean("trail", false));
         forecastSig = "";
         if (radioData != null) comms.radio(radioData);
         if (chatData != null) comms.chat(chatData);
@@ -871,7 +896,14 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             public void onTapThing(String kind, JSONObject thing) {
                 if ("mark".equals(kind)) markSheet(thing);
                 else if ("team".equals(kind)) teamSheet(thing);
+                else if ("car".equals(kind)) carSheet(thing);
+                else if ("seen".equals(kind)) seenSheet(thing);
                 else baseSheet();
+            }
+
+            @Override
+            public void onPlanWanted(boolean on) {
+                if ("map".equals(tab)) subscribe();
             }
 
             @Override
@@ -937,7 +969,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         f.addView(top, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
 
         LinearLayout ctrl = Ui.col(this);
-        String[] icons = {"plus", "minus", "locate", "layers"};
+        String[] icons = {"plus", "minus", "locate", "layers", "search"};
         for (int i = 0; i < icons.length; i++) {
             ImageView b = new ImageView(this);
             b.setImageDrawable(theme.icon(icons[i], i == 2 ? theme.accent : theme.text2));
@@ -949,7 +981,8 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
                 if (k == 0) map.zoom(1.6f);
                 else if (k == 1) map.zoom(1 / 1.6f);
                 else if (k == 2) map.setFollow(!map.isFollowing());
-                else showLegend();
+                else if (k == 3) showLegend();
+                else SeenSheet.open(this, this, map);   // "Where did I see...?"
             });
             if (i == 2) followBtn = b;
             ctrl.addView(b, Ui.margins(Ui.lp(theme.dp(52), theme.dp(52)), 0, 0, 0, theme.dp(8)));
@@ -979,8 +1012,44 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             flow.addView(r);
         }
         sheet.addView(flow);
-        sheet.addView(Ui.text(this, theme, "Press and hold on the map to set a waypoint, draw on your map or set your base. Tap a building to see what it is.", 13.5f, theme.text3, false),
-                Ui.margins(Ui.lp(-1, -2), 0, theme.dp(16), 0, 0));
+        sheet.addView(Ui.text(this, theme, "Press and hold on the map to set a waypoint, draw on your map or set your base. Tap a building to see what it is. "
+                        + "A green tick: a building you've searched. Zoom all the way in for the floor plan around you.", 13.5f, theme.text3, false),
+                Ui.margins(Ui.lp(-1, -2), 0, theme.dp(16), 0, theme.dp(12)));
+        boolean trailOn = prefs.getBoolean("trail", false);
+        TextView trail = Ui.action(this, theme, "map", trailOn ? "Hide the way you walked" : "Show the way you walked");
+        trail.setOnClickListener(v -> {
+            boolean on = !prefs.getBoolean("trail", false);
+            prefs.edit().putBoolean("trail", on).apply();
+            map.setTrailShown(on);
+            closeSheet();
+        });
+        sheet.addView(trail);
+        openSheet(sheet);
+    }
+
+    /** The car the character left: where, and a waypoint to it. */
+    private void carSheet(JSONObject car) {
+        LinearLayout sheet = Ui.col(this);
+        int x = car.optInt("x"), y = car.optInt("y");
+        String far = distanceFrom(x + 0.5, y + 0.5);
+        sheetTitle(sheet, car.optString("n", "Your car"), far == null ? "Where you left it" : "Where you left it · " + far);
+        sheetAction(sheet, "pin", "Set a waypoint to it", () -> { command("waypoint", Ui.args("x", x, "y", y), "Waypoint set"); closeSheet(); });
+        sheetAction(sheet, "x", "Close", this::closeSheet);
+        openSheet(sheet);
+    }
+
+    /** A "Where did I see...?" find on the map. */
+    private void seenSheet(JSONObject o) {
+        LinearLayout sheet = Ui.col(this);
+        int n = o.optInt("c", 1);
+        StringBuilder where = new StringBuilder(o.optString("b", ""));
+        if (o.has("rm")) where.append(" · ").append(o.optString("rm"));
+        if (o.has("town")) where.append(" · ").append(o.optString("town"));
+        sheetTitle(sheet, o.optString("n") + (n > 1 ? "  ×" + n : ""), where + " · seen " + SeenSheet.ago(o.optDouble("h", 0)));
+        int x = o.optInt("x"), y = o.optInt("y");
+        sheetAction(sheet, "pin", "Set a waypoint there", () -> { command("waypoint", Ui.args("x", x, "y", y), "Waypoint set"); closeSheet(); });
+        sheetAction(sheet, "search", "Search again…", () -> SeenSheet.open(this, this, map));
+        sheetAction(sheet, "x", "Clear the pins", () -> { map.setPins(null, -1); closeSheet(); });
         openSheet(sheet);
     }
 
@@ -1636,6 +1705,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         for (Map.Entry<String, View> e : screens.entrySet()) e.getValue().setVisibility(e.getKey().equals(key) ? View.VISIBLE : View.GONE);
         styleRail();
         subscribe();
+        if ("ask".equals(key)) ask.shown();
         if ("map".equals(key) && fogWanted) main.post(fogPoll);
         prefs.edit().putString("tab", key).apply();
     }
@@ -1651,9 +1721,19 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             c.put("loot");
             if (gear != null && "craft".equals(gear.segment())) c.put("craft");
         }
-        if ("journal".equals(tab)) c.put("journal");
+        if ("journal".equals(tab)) { c.put("journal"); c.put("diaries"); }
+        if ("ask".equals(tab)) c.put("ask");
         if ("skills".equals(tab)) c.put("skills");
-        if ("map".equals(tab)) { c.put("marks"); c.put("team"); }
+        if ("map".equals(tab)) {
+            c.put("marks");
+            c.put("team");
+            c.put("memory");
+            if (map != null && map.planWanted()) c.put("plan");   // zoomed all the way in
+        }
+        // answers the game sends once, when a screen asks: a search, a diary; and a character's recap when they die
+        c.put("seen");
+        c.put("diary");
+        c.put("recap");
         if ("comms".equals(tab)) c.put("radio");
         if ("base".equals(tab)) c.put("base");
         // multiplayer chat is followed everywhere, for its alerts
@@ -1734,6 +1814,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             case "hello":
                 if (m.optBoolean("ok")) {
                     authed = true;
+                    httpKey = m.optString("key", "");
                     conn.setBackground(theme.round(theme.good, 6));
                     art.retryNow();   // pictures asked for before the game's server was up
                     subscribe();
@@ -1816,6 +1897,32 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             case "radar":
                 radarData = d;
                 if (radar != null) radar.update(d);
+                if (map != null) map.setZombies(d);
+                break;
+            case "plan":
+                planData = d;
+                map.setPlan(d);
+                break;
+            case "memory":
+                memoryData = d;
+                map.setMemory(d);
+                break;
+            case "seen":
+                SeenSheet.onSeen(d);
+                break;
+            case "diaries":
+                diariesData = d;
+                journal.diaries(d);
+                break;
+            case "diary":
+                Diaries.onDiary(this, this, d);
+                break;
+            case "recap":
+                Recap.maybeShow(this, this, d);
+                break;
+            case "ask":
+                askData = d;
+                ask.situation(d);
                 break;
             case "menu":
                 // the game's own menu for something a screen asked about

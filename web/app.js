@@ -1,6 +1,6 @@
 /* Knox Link — second screen for Project Zomboid. The shell: connection, tabs, top bar, the map and
    its sheets, alerts, sheets and toasts. Plain JavaScript, no build step, nothing loaded from
-   outside the game. */
+   outside the game (only Ask talks to the AI service the player picked, with their own key). */
 'use strict';
 
 const S = { core: null, lastCoreAt: 0 };
@@ -12,6 +12,13 @@ let watch = null;
 
 let ws = null, wsReady = false, authed = false, retry = 0, nextCmd = 1;
 const pending = new Map();
+/** The game server's key for this session (hello): photos and the way walked need it, from another device. */
+let httpKey = '';
+
+/** The game server's address for one of the character's own things ("/api/photo?id=..."), with this session's key. */
+function apiUrl(path) {
+  return httpKey ? path + (path.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(httpKey) : path;
+}
 
 function pinFromHash() {
   const m = location.hash.match(/pin=(\d{4})/);
@@ -90,9 +97,15 @@ function subscribe() {
     c.push('gear', 'outfit', 'loot');
     if (Gear.seg === 'craft') c.push('craft');
   }
-  if (tab === 'journal') c.push('journal');
+  if (tab === 'journal') c.push('journal', 'diaries');
+  if (tab === 'ask') c.push('ask');
   if (tab === 'skills') c.push('skills');
-  if (tab === 'map') c.push('marks', 'team');
+  if (tab === 'map') {
+    c.push('marks', 'team', 'memory');
+    if (KnoxMap.planWanted()) c.push('plan');   // zoomed all the way in
+  }
+  // answers the game sends once, when a screen asks: a search, a diary; and a character's recap when they die
+  c.push('seen', 'diary', 'recap');
   if (tab === 'comms') c.push('radio');
   if (tab === 'base') c.push('base');
   // multiplayer chat is followed everywhere, for its alerts
@@ -111,6 +124,13 @@ function onMessage(m) {
     case 'hello':
       if (m.ok) {
         authed = true;
+        const key = String(m.key || '');
+        if (key !== httpKey) {
+          // a new server session: the photos on the pages need the new key
+          httpKey = key;
+          Journal.sig = '';
+          if (S.journal) Journal.journal(S.journal);
+        }
         setConn(true);
         $('#verText').textContent = m.version || '';
         $('#connInfo').textContent = location.host + (m.local ? ' (this device)' : '');
@@ -164,7 +184,14 @@ function onState(channel, d) {
     case 'marks': onMarks(d); break;
     case 'outfit': Vitals.outfit(d); Gear.outfit(d); break;
     case 'loot': Gear.loot(d); break;
-    case 'radar': Radar.update(d); break;
+    case 'radar': Radar.update(d); KnoxMap.setZombies(d); break;
+    case 'plan': KnoxMap.setPlan(d); break;
+    case 'memory': KnoxMap.setMemory(d); break;
+    case 'seen': Seen.onSeen(d); break;
+    case 'diaries': Journal.diaries(d); break;
+    case 'diary': Diaries.onDiary(d); break;
+    case 'recap': Recap.maybeShow(d); break;
+    case 'ask': Ask.situation(d); break;
     case 'menu': GameMenu.onMenu(d); break;   // the game's own menu for something a screen asked about
     case 'craft': Gear.craft(d); break;
     case 'journal': Journal.journal(d); break;
@@ -229,6 +256,7 @@ const TABS = [
   { k: 'comms', label: 'Radio', icon: 'radio' },
   { k: 'base', label: 'Base', icon: 'home', more: true },
   { k: 'journal', label: 'Journal', icon: 'book', more: true },
+  { k: 'ask', label: 'Ask', icon: 'ask', more: true },
   { k: 'car', label: 'Car', icon: 'car' },
 ];
 
@@ -274,7 +302,14 @@ function setTab(key) {
   subscribe();
   if (key === 'map') { KnoxMap.redraw(); if (fogWanted) fogPoll(); }
   if (key === 'comms') { updateCommsBadge(); if (Comms.modeNow() === 'chat') Comms.scrollChat(); }
+  if (key === 'ask') Ask.shown();
   store('kl.tab', key);
+}
+
+/** Shows the map, centred on a place, zoomed in at least this far (css px per square). */
+function showOnMap(x, y, zoom) {
+  setTab('map');
+  KnoxMap.focusOn(x, y, zoom);
 }
 
 function setBadge(key, on) {
@@ -445,8 +480,12 @@ function initMap() {
     onThing(kind, thing) {
       if (kind === 'mark') markSheet(thing);
       else if (kind === 'team') teamSheet(thing);
+      else if (kind === 'car') carSheet(thing);
+      else if (kind === 'seen') seenSheet(thing);
       else baseSheet();
     },
+    // zoomed in far enough for the floor plan (or out of it): the game sends it only while it's wanted
+    onPlanWanted() { if (tab === 'map') subscribe(); },
     onBuilding(name) {
       const chip = $('#placeChip');
       clearTimeout(placeTimer);
@@ -465,6 +504,8 @@ function initMap() {
   $('#zoomOut').addEventListener('click', () => KnoxMap.zoom(1 / 1.6));
   $('#follow').addEventListener('click', () => KnoxMap.setFollow(!KnoxMap.isFollowing()));
   $('#legendBtn').addEventListener('click', legendSheet);
+  $('#seenBtn').addEventListener('click', () => Seen.open());   // "Where did I see...?"
+  KnoxMap.setTrailShown(load('kl.trail') === '1');
   $('#wpClear').addEventListener('click', () => command('waypointClear', {}, 'Waypoint cleared'));
   if (load('kl.mapHint')) hideMapHint();
   else setTimeout(hideMapHint, 9000);
@@ -480,8 +521,41 @@ function legendSheet() {
   const kinds = [[K.RES, 'Residential'], [K.RETAIL, 'Shops & offices'], [K.FOOD, 'Restaurants & bars'], [K.MEDICAL, 'Medical'],
     [K.COMMUNITY, 'Police, fire, schools'], [K.INDUSTRIAL, 'Industrial'], [K.HOSPITALITY, 'Hotels & motels'], [K.PRIMARY, 'Road'],
     [K.WATER, 'Water'], [K.FOREST, 'Forest']];
+  const trailOn = load('kl.trail') === '1';
   openSheet(sheetHead('Map key') + `<div class="legend">${kinds.map(([k, n]) => `<span><i style="background:${KnoxMap.colorOf(k)}"></i>${n}</span>`).join('')}</div>
-    <p class="sh-note">Press and hold on the map to set a waypoint, draw on your map or set your base. Tap a building to see what it is.</p>`);
+    <p class="sh-note">Press and hold on the map to set a waypoint, draw on your map or set your base. Tap a building to see what it is.
+      A green tick: a building you've searched. Zoom all the way in for the floor plan around you.</p>
+    <div class="acts">${act('map', trailOn ? 'Hide the way you walked' : 'Show the way you walked', 'trail')}</div>`, {
+    trail: () => {
+      const on = load('kl.trail') !== '1';
+      store('kl.trail', on ? '1' : null);
+      KnoxMap.setTrailShown(on);
+      closeSheet();
+    },
+  });
+}
+
+/** The car the character left: where, and a waypoint to it. */
+function carSheet(car) {
+  const x = Math.floor(car.x), y = Math.floor(car.y);
+  const far = distanceFrom(x + 0.5, y + 0.5);
+  openSheet(sheetHead(esc(car.n || 'Your car'), far ? 'Where you left it · ' + far : 'Where you left it')
+    + `<div class="acts">${act('pin', 'Set a waypoint to it', 'wp')}${act('x', 'Close', 'close')}</div>`, {
+    wp: () => { command('waypoint', { x, y }, 'Waypoint set'); closeSheet(); },
+    close: () => closeSheet(),
+  });
+}
+
+/** A "Where did I see...?" find on the map. */
+function seenSheet(o) {
+  const n = Number(o.c) || 1;
+  const x = Math.floor(o.x), y = Math.floor(o.y);
+  openSheet(sheetHead(esc(o.n) + (n > 1 ? ` <span class="muted">×${n}</span>` : ''), esc(Seen.where(o, false) + ' · seen ' + Seen.ago(o.h)))
+    + `<div class="acts">${act('pin', 'Set a waypoint there', 'wp')}${act('search', 'Search again…', 'again')}${act('x', 'Clear the pins', 'clear')}</div>`, {
+    wp: () => { command('waypoint', { x, y }, 'Waypoint set'); closeSheet(); },
+    again: () => Seen.open(),
+    clear: () => { KnoxMap.setPins(null, -1); closeSheet(); },
+  });
 }
 
 function distanceFrom(x, y) {
@@ -956,6 +1030,7 @@ function start() {
   Base.init();
   Game.init();
   Journal.init();
+  Ask.init();
   if (!('vibrate' in navigator)) $('input[data-set="vibrate"]').closest('.set-row').hidden = true;
   applySettings();
   updateFsButton();

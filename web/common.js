@@ -146,3 +146,13 @@ function bar(v, color, cls = '') {
 function emptyState(iconName, title, text) {
   return `<div class="empty-state">${icon(iconName)}<b>${title}</b><p>${text}</p></div>`;
 }
+
+/** Hands the browser a file to keep (a photo, a picture of a card): this device's downloads, or a phone's gallery. */
+function download(href, name) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}

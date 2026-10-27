@@ -622,12 +622,17 @@ local function itemEntry(player, item)
         e.ammo = try(item, "getCurrentAmmoCount", 0)
         e.ammoMax = try(item, "getMaxAmmo", 0)
     end
+    -- a diary someone left behind (KnoxLink_Legacy): the screens can open it ("lg" = whose)
+    if e.t == "Base.Diary1" or e.t == "Base.Diary2" then
+        local md = item:getModData()
+        if md and md.KnoxLinkLegacy then e.lg = md.KnoxLinkLegacy end
+    end
     return e
 end
 
 -- Identical items (same type, name and state) collapse into one row with a count.
 local function groupKey(e)
-    if e.eq or e.worn or e.cond or e.fluid or e.ammo or e.use then return "id" .. e.id end
+    if e.eq or e.worn or e.cond or e.fluid or e.ammo or e.use or e.lg then return "id" .. e.id end
     local f = e.food
     local foodKey = f and ((f.rotten and "r" or "") .. (f.stale and "s" or "") .. (f.cooked and "c" or "") .. (f.burnt and "b" or "") .. (f.frozen and "f" or "")) or ""
     return e.t .. "|" .. e.n .. "|" .. foodKey

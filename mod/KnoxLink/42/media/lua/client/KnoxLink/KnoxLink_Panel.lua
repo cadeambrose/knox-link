@@ -42,6 +42,7 @@ if PZAPI and PZAPI.ModOptions then
         { opt = o:addKeyBind("keyDrink", "UI_KnoxLink_OptKeyDrink", 0, "UI_KnoxLink_OptKeyDrink_tip"), cmd = "quick", a = "drink" },
         { opt = o:addKeyBind("keyLight", "UI_KnoxLink_OptKeyLight", 0, "UI_KnoxLink_OptKeyLight_tip"), cmd = "quick", a = "light" },
         { opt = o:addKeyBind("keyWeapon", "UI_KnoxLink_OptKeyWeapon", 0, "UI_KnoxLink_OptKeyWeapon_tip"), cmd = "quick", a = "weapon" },
+        { opt = o:addKeyBind("keyPhoto", "UI_KnoxLink_OptKeyPhoto", 0, "UI_KnoxLink_OptKeyPhoto_tip"), cmd = "photo" },
     }
     o.apply = function()
         if KL.hasServer() then KnoxLink_setLan(KL.options.lan:getValue()) end
@@ -227,8 +228,9 @@ Events.OnKeyPressed.Add(function(key)
     for _, s in ipairs(KL.shortcuts or {}) do
         local k = s.opt:getValue()
         if k ~= 0 and key == k and KL.handlers[s.cmd] then
-            local ok, r1, r2 = pcall(KL.handlers[s.cmd], player, { a = s.a })
+            local ok, r1, r2 = pcall(KL.handlers[s.cmd], player, { a = s.a, key = true })
             if ok and r1 == false and r2 then HaloTextHelper.addBadText(player, tostring(r2)) end
+            if ok and r1 ~= false and s.cmd == "photo" then HaloTextHelper.addText(player, "Photo taken" .. (r2 and (" · " .. tostring(r2)) or "")) end
         end
     end
 end)

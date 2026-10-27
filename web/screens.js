@@ -953,7 +953,13 @@ const Gear = {
       unequip: ['x', 'Put away', 'Putting away'], read: ['book', 'Read', 'Reading'], pill: ['pill', 'Take one', 'Taking'],
       wear: ['shirt', 'Wear', 'Putting on'], takeoff: ['shirt', 'Take off', 'Taking off'],
     };
+    if (it.lg) {
+      // a diary someone left behind: read here, page by page
+      acts += act('book', 'Read the diary', 'diary');
+      n++;
+    }
     for (const a of arr(it.a)) {
+      if (a === 'read' && it.lg) continue;
       if (a === 'eat' || a === 'drink') {
         acts += `<p class="sh-label">${a === 'eat' ? 'Eat' : 'Drink'}</p><div class="act-row">`
           + [['1', 'All'], ['0.5', 'Half'], ['0.25', 'Quarter']].map(([p, l]) => act(null, l, a, `data-portion="${p}"`)).join('') + '</div>';
@@ -977,6 +983,8 @@ const Gear = {
       } else if (name === 'menu') {
         GameMenu.open(it.n, { kind: 'item', ids });
         return;
+      } else if (name === 'diary') {
+        Diaries.read(String(it.lg));   // it opens when the game has sent it
       } else if (name === 'eat' || name === 'drink') {
         command(name, { id, portion: Number(b.dataset.portion) }, name === 'eat' ? 'Eating' : 'Drinking');
       } else if (defs[name]) {
@@ -1072,9 +1080,11 @@ const Gear = {
     targets.delete('inv');
     openSheet(`<div class="sh-item">${itemIcon(it.ic, fallbackIcon(it), 'huge')}<div><h3>${esc(it.n)}${cnt > 1 ? ` <span class="muted">×${cnt}</span>` : ''}</h3>
         <p class="sh-sub">In ${esc(cont.n)}</p></div></div>`
-      + `<div class="acts">${act('hand', cnt > 1 ? 'Take one' : 'Take', 'one')}${cnt > 1 ? act('bag', 'Take all ' + cnt, 'all') : ''}</div>`
+      // a diary someone left behind: it can be read where it lies
+      + `<div class="acts">${it.lg ? act('book', 'Read the diary', 'diary') : ''}${act('hand', cnt > 1 ? 'Take one' : 'Take', 'one')}${cnt > 1 ? act('bag', 'Take all ' + cnt, 'all') : ''}</div>`
       + moveToHtml(targets)
       + `<div class="acts after">${act('more', 'All actions…', 'menu')}</div>`, {
+      diary: () => { closeSheet(); Diaries.read(String(it.lg)); },
       one: () => { command('take', { id: it.id }, 'Taking'); closeSheet(); },
       all: () => { command('take', { ids }, 'Taking'); closeSheet(); },
       move: (b) => { command('move', { ids, to: b.dataset.to }, 'Moving'); closeSheet(); },
@@ -1634,13 +1644,25 @@ const Game = {
 /**
  * The survivor's journal: a page a day, written as a diary in the character's own voice (by the
  * game's offline writer, or the AI writer of the Android app when it's on), with what happened
- * folded underneath (kills, skills, wounds, places, sleep) and your own notes, on paper like the
- * game's notebooks.
+ * folded underneath (kills, skills, wounds, places, sleep), the day's photos and your own notes,
+ * on paper like the game's notebooks. Above them, the diaries of the dead the character found.
  */
 const Journal = {
   init() {
     this.unfolded = new Set();   // pages whose "what happened" is open
+    // the scrapbook: a photo of the game for today's page (a camera in the game, in immersion)
+    $('#photoBtn').addEventListener('click', () => command('photo', {}, 'Photo taken'));
+    $('#diariesFound').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-diary]');
+      if (b) Diaries.read(b.dataset.diary);
+    });
     $('#journalPages').addEventListener('click', (e) => {
+      const ph = e.target.closest('[data-photo]');
+      if (ph) {
+        const p = this.photo(Number(ph.dataset.day), ph.dataset.photo);
+        if (p) Photos.open(p, true);
+        return;
+      }
       const f = e.target.closest('[data-fold]');
       if (!f) return;
       const facts = f.nextElementSibling;
@@ -1693,13 +1715,33 @@ const Journal = {
     $('#journalPages').innerHTML = html;
   },
 
+  /** A photo on one of the pages, by its day and id. */
+  photo(day, id) {
+    const p = arr(S.journal && S.journal.days).find((x) => Number(x.d) === day);
+    return p ? arr(p.ph).find((x) => String(x.id) === id) || null : null;
+  },
+
+  /** The left-behind diaries the character has with them or within reach ("diaries"). */
+  diaries(d) {
+    const html = Diaries.card(d);
+    if (html === this.diariesSig) return;
+    this.diariesSig = html;
+    const box = $('#diariesFound');
+    box.innerHTML = html;
+    box.hidden = !html;
+  },
+
   page(p, today, write) {
     const d = p.d;
     // the diary entry, in the character's hand: the AI writer's when one has been written, else the game's own
     const ai = write && p.ai ? String(p.ai) : '';
     const entry = ai || (write && p.entry ? String(p.entry) : '');
     let html = '';
-    if (entry) html += `<p class="entry">${esc(entry)}</p>${ai ? '<p class="entry-by">written by AI</p>' : ''}`;
+    if (entry) html += `<p class="entry">${esc(entry)}</p>`;
+    // the day's photos, like prints tucked in the page
+    const photos = arr(p.ph).filter((x) => x && x.id);
+    if (photos.length) html += Photos.strip(photos, `data-day="${d}"`);
+    if (entry && ai) html += '<p class="entry-by">written by AI</p>';
     // what happened: folded under the entry, or the page itself when there's no entry
     let facts = '', n = 0;
     const kills = p.kills || 0;
@@ -1716,7 +1758,7 @@ const Journal = {
       html += `<div class="note" data-day="${d}" data-note="${i + 1}" title="Press and hold to tear it out">${esc(note.s)}${note.w ? `<span class="when">${Fmt.clock(note.h, note.mi)}</span>` : ''}</div>`;
       n++;
     });
-    if (!n && !entry) html = `<p class="quiet">${d === today ? 'Nothing written yet today.' : 'A quiet day.'}</p>`;
+    if (!n && !entry && !photos.length) html = `<p class="quiet">${d === today ? 'Nothing written yet today.' : 'A quiet day.'}</p>`;
     return `<article class="page"><header><h3>Day ${d}</h3>${d === today ? '<span>Today</span>' : ''}</header>${html}</article>`;
   },
 
@@ -1731,5 +1773,887 @@ const Journal = {
       yes: () => { command('noteDelete', { d: day, i: index }, null); closeSheet(); },
       no: () => closeSheet(),
     });
+  },
+};
+
+// =================================================================== the scrapbook's photos
+
+/**
+ * The scrapbook's photos on the second screen: a strip of them on a journal page, a viewer with
+ * the caption, and saving one to this device. They come from the game's server (/api/photo, with
+ * the session's key); the game keeps them in the save.
+ */
+const Photos = {
+  url: (id) => apiUrl('/api/photo?id=' + encodeURIComponent(id)),
+
+  /** A page's photos side by side, like prints tucked in the page; a tap opens one (data-photo is its id). */
+  strip(list, attrs = '') {
+    return `<div class="prints">${list.map((p) => `<button class="print" data-photo="${esc(p.id)}" ${attrs}>`
+      + `<img alt="" loading="lazy" src="${esc(this.url(p.id))}">${p.c ? `<span>${esc(p.c)}</span>` : ''}</button>`).join('')}</div>`;
+  },
+
+  /** The viewer: the photo, its caption, and what can be done with it. editable: the character's own (caption, throw away). */
+  open(p, editable) {
+    const id = String(p.id);
+    let caption = String(p.c || '');
+    const when = p.w ? `<p class="ph-when">${Fmt.clock(Number(p.h) || 0, Number(p.mi) || 0)}</p>` : '';
+    openSheet(`<div class="ph-view"><img alt="" src="${esc(this.url(id))}"></div>${when}`
+      + (editable ? `<form class="ph-cap" id="capForm"><input class="field" id="capInput" maxlength="120" value="${esc(caption)}" placeholder="Add a caption…"
+          autocomplete="off" enterkeyhint="done" aria-label="Caption"></form>`
+        : caption ? `<p class="ph-caption">${esc(caption)}</p>` : '')
+      + `<div class="acts">${act('camera', 'Save to this device', 'save')}${editable ? act('trash', 'Throw this photo away', 'del', '', 'danger') : ''}${act('x', 'Close', 'close')}</div>`, {
+      save: () => download(this.url(id), 'KnoxLink-' + id + '.jpg'),
+      del: () => { command('photoDelete', { id }, 'Photo thrown away'); closeSheet(); },
+      close: () => closeSheet(),
+    }, 'photo', { id });
+    const input = $('#capInput');
+    if (!input) return;
+    // saved once it's done: Enter (or Done), or leaving the field
+    input.addEventListener('change', () => {
+      const c = input.value.trim();
+      if (c === caption) return;
+      caption = c;
+      command('photoCaption', { id, c }, 'Caption saved');
+    });
+    $('#capForm').addEventListener('submit', (e) => { e.preventDefault(); input.blur(); });
+  },
+};
+
+// =================================================================== "Where did I see…?"
+
+/**
+ * "Where did I see...?": a search through everything the character has looked in (the game's
+ * loot window, as they went: Memory.java keeps it in the save). By name or by kind, nearest
+ * first, with the container, the room and the town; a tap shows it on the map.
+ */
+const Seen = {
+  KINDS: [['Food', 'cat:food'], ['Water', 'cat:water'], ['Medicine', 'cat:firstaid,bandage'], ['Weapons', 'cat:weapon'],
+    ['Tools', 'cat:tool'], ['Ammo', 'cat:ammo'], ['Bags', 'cat:bag'], ['Books', 'cat:skillbook,literature'],
+    ['Seeds', 'cat:gardening'], ['Materials', 'cat:material']],
+  req: 0,
+  timer: 0,
+  rows: [],
+
+  open() {
+    clearTimeout(this.timer);
+    this.rows = [];
+    openSheet(sheetHead('Where did I see…?', 'Everything your character has looked in, as they went.')
+      + `<input class="field" id="seenQ" type="search" placeholder="A hammer, beans, a shotgun…" autocomplete="off" spellcheck="false"
+          enterkeyhint="search" aria-label="What to look for">
+        <div class="chips seen-kinds">${this.KINDS.map(([label, q]) => `<button data-act="kind" data-q="${q}">${label}</button>`).join('')}</div>
+        <div id="seenResults"></div>
+        <div class="acts after">${act('x', 'Close', 'close')}</div>`, {
+      kind: (b) => {
+        clearTimeout(this.timer);
+        $('#seenQ').value = '';
+        this.mark(b);
+        this.search(b.dataset.q);
+      },
+      row: (b) => this.show(Number(b.dataset.i)),
+      close: () => closeSheet(),
+    }, 'seen');
+    const q = $('#seenQ');
+    q.addEventListener('input', () => {
+      this.mark(null);
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.search(q.value), 350);
+    });
+    q.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      clearTimeout(this.timer);
+      this.search(q.value);
+    });
+  },
+
+  /** The kind asked for last stays lit. */
+  mark(b) { $$('#sheet .seen-kinds button').forEach((x) => x.classList.toggle('on', x === b)); },
+
+  /** Asks the game; the answer comes back once on "seen" (onSeen). */
+  search(q) {
+    const box = $('#seenResults');
+    if (!box || sheetKind !== 'seen') return;
+    if (!String(q).trim()) { box.innerHTML = ''; return; }
+    this.req++;
+    command('seenFind', { q: String(q), req: this.req }, null);
+  },
+
+  /** The game answered a search ("seen"): to the open sheet, if it's the latest question. */
+  onSeen(d) {
+    const box = $('#seenResults');
+    if (!box || sheetKind !== 'seen' || Number(d.req) !== this.req) return;
+    const r = arr(d.r).filter((o) => o && typeof o === 'object');
+    this.rows = r;
+    if (!r.length) {
+      box.innerHTML = "<p class=\"none\">Nothing like that in anything you've looked through.</p>";
+      KnoxMap.setPins(null, -1);
+      return;
+    }
+    const total = Number(d.total) || r.length;
+    box.innerHTML = (total > r.length ? `<p class="seen-note">The nearest ${r.length} of ${total}</p>` : '')
+      + `<div class="acts">${r.map((o, i) => this.row(o, i)).join('')}</div>`;
+    KnoxMap.setPins(r, -1);
+  },
+
+  row(o, i) {
+    const n = Number(o.c) || 1, d = Number(o.d) || 0;
+    // a few steps away to the step, further in tens of metres
+    const far = d < 3 ? 'Here' : (d < 30 ? Fmt.near(d) : Fmt.dist(d)) + (o.dir ? ' ' + o.dir : '');
+    return `<button class="row-act seen-row" data-act="row" data-i="${i}">${itemIcon(o.ic, 'box', 'sm')}
+      <span class="ra-main"><span class="ra-name">${esc(o.n)}${n > 1 ? `<span class="cnt">×${n}</span>` : ''}</span><span class="ra-sub">${esc(this.where(o, true))}</span></span>
+      <span class="seen-far"><b>${esc(far)}</b><span>${esc(this.ago(o.h))}</span></span></button>`;
+  },
+
+  /** A find tapped: every find stays pinned, this one big, and the map goes there. */
+  show(i) {
+    const o = this.rows[i];
+    if (!o) return;
+    KnoxMap.setPins(this.rows, i);
+    showOnMap(Number(o.x) + 0.5, Number(o.y) + 0.5, 3);
+    closeSheet();
+  },
+
+  /** "Counter · Kitchen · Muldraugh" (floor: and "upstairs" when it was on another floor). */
+  where(o, floor) {
+    let s = String(o.b || '');
+    if (o.rm) s += ' · ' + o.rm;
+    if (o.town) s += ' · ' + o.town;
+    const z = Number(o.z) || 0;
+    if (floor && z) s += ' · ' + (z > 0 ? 'upstairs' : 'downstairs');
+    return s;
+  },
+
+  ago(hours) {
+    const h = Number(hours) || 0;
+    if (h < 1) return 'just now';
+    if (h < 24) {
+      const n = Math.round(h);
+      return n === 1 ? 'an hour ago' : n + ' hours ago';
+    }
+    const d = Math.round(h / 24);
+    return d === 1 ? 'yesterday' : d + ' days ago';
+  },
+};
+
+// =================================================================== diaries left behind
+
+/**
+ * Diaries left behind: when a character dies, their journal stays on their body as a diary
+ * (KnoxLink_Legacy.lua). The journal lists the ones the character has with them or within reach,
+ * and opens one like a book: the dead character's days in their own words, with their photos.
+ */
+const Diaries = {
+  MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  req: 0,
+  book: null,   // the diary open in the sheet
+
+  /** The journal's "Diaries you found", or '' when there are none here. */
+  card(d) {
+    const list = arr(d && d.list).filter((e) => e && e.id);
+    if (!list.length) return '';
+    return `<h2>${list.length === 1 ? 'A diary you found' : 'Diaries you found'}</h2>` + list.map((e) => {
+      const days = Number(e.days) || 0;
+      const where = e.on ? 'With you' : e.near ? 'Within reach' : 'From this world';
+      return `<button class="paper diary-row" data-diary="${esc(e.id)}">${icon('book')}<span class="dr-main"><b>${esc(e.name)}'s diary</b>
+        <span>${where} · ${days === 1 ? '1 day' : days + ' days'}</span></span><span class="dr-read">Read</span></button>`;
+    }).join('');
+  },
+
+  /** Asks the game for a diary; it comes back on "diary" (onDiary). */
+  read(id) {
+    this.req++;
+    command('diaryRead', { id, req: this.req }, null);
+  },
+
+  /** The game sent a diary: open it if it's the one asked for last. */
+  onDiary(d) {
+    if (!d || Number(d.req) !== this.req) return;
+    this.req++;   // shown once
+    this.show(d);
+  },
+
+  /** The calendar date of a diary's day n, from its day 1 ({y, mo, d}). */
+  dateOf(start, n) {
+    if (!start || start.y == null) return null;
+    const t = new Date(Date.UTC(Number(start.y), (Number(start.mo) || 1) - 1, (Number(start.d) || 1) + n - 1));
+    return `${this.MONTHS[t.getUTCMonth()]} ${t.getUTCDate()}, ${t.getUTCFullYear()}`;
+  },
+
+  show(d) {
+    this.book = d;
+    // the cover: who they were
+    const who = [d.prof, ...arr(d.traits).slice(0, 4)].filter((s) => s).map(String).join(' · ');
+    const days = arr(d.days).filter((p) => p && typeof p === 'object');
+    const last = days.length ? Number(days[days.length - 1].d) || 1 : 1;
+    let pages = '';
+    for (const p of days) {
+      const text = String(p.s || ''), notes = arr(p.notes), ph = arr(p.ph).filter((x) => x && x.id);
+      if (!text && !notes.length && !ph.length) continue;
+      const n = Number(p.d) || 1, date = this.dateOf(d.start, n);
+      pages += `<section class="book-day"><header><h4>Day ${n}</h4>${date ? `<span>${date}</span>` : ''}</header>
+        ${text ? `<p class="entry">${esc(text)}</p>` : ''}${notes.map((s) => `<p class="book-note">${esc(s)}</p>`).join('')}
+        ${ph.length ? Photos.strip(ph, 'data-act="photo"') : ''}</section>`;
+    }
+    openSheet(`<div class="paper book"><h3 class="book-title">${esc(d.name)}'s diary</h3>${who ? `<p class="book-who">${esc(who)}</p>` : ''}
+        <p class="book-span">${last === 1 ? 'One day.' : `Day 1 to day ${last}.`}</p>
+        ${pages || '<p class="book-blank">The pages are blank.</p>'}</div>
+      <div class="acts after">${act('x', 'Close the diary', 'close')}</div>`, {
+      photo: (b) => { const p = this.photo(b.dataset.photo); if (p) Photos.open(p, false); },
+      close: () => closeSheet(),
+    }, 'diary');
+  },
+
+  photo(id) {
+    for (const p of arr(this.book && this.book.days)) {
+      const ph = arr(p && p.ph).find((x) => x && String(x.id) === id);
+      if (ph) return ph;
+    }
+    return null;
+  },
+};
+
+// =================================================================== a character's recap
+
+/**
+ * When a character dies, their run on one card (KnoxLink_Legacy.lua sends it on "recap"): how long
+ * they lasted, how it ended, what they did, the way they walked and their last photo. It can be
+ * saved as a picture, to keep or to share.
+ */
+const Recap = {
+  PAPER: '#e9e3cd', INK: '#2b2620', INK_SOFT: '#6b6050', RED: '#a60e0e', GREEN: '#3e7c47',
+  SERIF: 'Georgia, "Times New Roman", "Noto Serif", serif',
+  SANS: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  r: null,
+  trail: null,   // the way walked ([x, y, ...]), or null until it's here (or when it couldn't be read)
+
+  /** Shows a character's recap once (a screen that connects later gets the same one again: not shown twice). */
+  maybeShow(r) {
+    const id = String((r && r.id) || '');
+    if (!id) return;
+    let seen = [];
+    try { seen = JSON.parse(load('kl.recapsSeen') || '[]'); } catch (e) { seen = []; }
+    if (!Array.isArray(seen)) seen = [];
+    if (seen.includes(id)) return;
+    seen.push(id);
+    store('kl.recapsSeen', JSON.stringify(seen.slice(-50)));
+    this.show(r);
+  },
+
+  lasted(hours) {
+    const days = Math.floor(hours / 24), h = Math.floor(hours % 24);
+    const d = days === 1 ? '1 day' : days + ' days';
+    if (days === 0) return h === 1 ? '1 hour' : h + ' hours';
+    return h === 0 ? d : d + ', ' + (h === 1 ? '1 hour' : h + ' hours');
+  },
+
+  ending(cause) {
+    if (!cause) return null;
+    switch (cause) {
+      case 'zombies': return 'Killed by the dead';
+      case 'the infection': return 'Taken by the infection';
+      case 'starvation': return 'Starved';
+      case 'thirst': return 'Died of thirst';
+      default: return 'Died of ' + cause;
+    }
+  },
+
+  date(d) {
+    if (!d || d.y == null) return null;
+    return `${Diaries.MONTHS[Math.max(0, Math.min(11, (Number(d.mo) || 1) - 1))]} ${Number(d.d) || 0}, ${Number(d.y)}`;
+  },
+
+  /** The way walked, in squares (about metres). */
+  walked(p) {
+    let s = 0;
+    for (let i = 2; p && i + 1 < p.length; i += 2) s += Math.hypot(p[i] - p[i - 2], p[i + 1] - p[i - 1]);
+    return s;
+  },
+
+  /** The words and numbers of the card, for the sheet and the picture. */
+  facts(r) {
+    const hours = Number(r.hours) || 0, kills = Number(r.kills) || 0;
+    const from = this.date(r.start), to = this.date(r.died);
+    return {
+      name: String(r.name || ''),
+      sub: (r.prof ? r.prof + ' · ' : '') + 'survived ' + this.lasted(hours),
+      dates: from && to ? from + ' – ' + to : '',
+      end: this.ending(r.cause),
+      nums: [[String(Math.max(1, Math.floor(hours / 24) + 1)), 'days'], [String(kills), kills === 1 ? 'kill' : 'kills'],
+        [!this.trail || this.trail.length < 4 ? '–' : Fmt.dist(this.walked(this.trail)), 'walked']],
+      best: arr(r.best).filter((b) => b && b.n).map((b) => `${b.n} ${Number(b.l) || 0}`).join(' · '),
+      moments: arr(r.moments).filter((m) => m && m.s).map((m) => `Day ${Number(m.d) || 1}  ·  ${m.s}`),
+    };
+  },
+
+  show(r) {
+    this.r = r;
+    this.trail = null;
+    const f = this.facts(r);
+    openSheet(`<div class="paper recap"><h3 class="rc-name">${esc(f.name)}</h3><p class="rc-sub">${esc(f.sub)}</p>
+        ${f.dates ? `<p class="rc-sub">${esc(f.dates)}</p>` : ''}${f.end ? `<p class="rc-end">${esc(f.end)}.</p>` : ''}
+        <div class="rc-stats">${f.nums.map(([v, l], i) => `<div><b${i === 2 ? ' id="rcWalked"' : ''}>${i === 2 ? '…' : esc(v)}</b><span>${l}</span></div>`).join('')}</div>
+        <canvas class="rc-trail" id="rcTrail" role="img" aria-label="The way they walked"></canvas>
+        ${f.best ? `<p class="rc-best">Best at: ${esc(f.best)}</p>` : ''}${f.moments.map((s) => `<p class="rc-moment">${esc(s)}</p>`).join('')}
+        ${r.ph ? `<img class="rc-photo" id="rcPhoto" alt="" src="${esc(Photos.url(String(r.ph)))}">` : ''}</div>
+      <div class="acts after">${act('camera', 'Save this card as a picture', 'save')}${act('x', 'Close', 'close')}</div>`, {
+      save: () => this.save(),
+      close: () => closeSheet(),
+    }, 'recap');
+    this.drawSmall();
+    fetch(apiUrl('/api/trail?id=' + encodeURIComponent(String(r.id))), { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null)).catch(() => null)
+      .then((j) => {
+        if (this.r !== r) return;
+        const p = j && Array.isArray(j.p) ? j.p.map(Number) : null;
+        this.trail = p ? p.slice(0, p.length - (p.length % 2)) : null;
+        const w = $('#rcWalked');
+        if (!w || sheetKind !== 'recap') return;
+        w.textContent = this.facts(r).nums[2][0];
+        this.drawSmall();
+      });
+  },
+
+  /** The trail on the open card, sharp on any screen. */
+  drawSmall() {
+    const c = $('#rcTrail');
+    if (!c) return;
+    const box = c.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    c.width = Math.round(box.width * dpr);
+    c.height = Math.round(box.height * dpr);
+    const g = c.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.drawTrail(g, 0, 0, box.width, box.height, this.trail, 1);
+  },
+
+  rrect(g, x, y, w, h, r) {
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r);
+    g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r);
+    g.arcTo(x, y, x + w, y, r);
+    g.closePath();
+  },
+
+  /** The way walked, drawn small: start in green, the end in red. dp: the size of a css pixel here. */
+  drawTrail(g, x, y, w, h, pts, dp) {
+    g.save();
+    g.fillStyle = '#ddd5bc';
+    this.rrect(g, x, y, w, h, 8 * dp);
+    g.fill();
+    g.clip();
+    if (!pts || pts.length < 4) {
+      g.fillStyle = this.INK_SOFT;
+      g.font = `${13 * dp}px ${this.SANS}`;
+      g.textAlign = 'center';
+      g.fillText(pts ? "They didn't go far." : '…', x + w / 2, y + h / 2);
+      g.restore();
+      return;
+    }
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i + 1 < pts.length; i += 2) {
+      x0 = Math.min(x0, pts[i]); x1 = Math.max(x1, pts[i]);
+      y0 = Math.min(y0, pts[i + 1]); y1 = Math.max(y1, pts[i + 1]);
+    }
+    const pad = 14 * dp, bw = Math.max(20, x1 - x0), bh = Math.max(20, y1 - y0);
+    const s = Math.min((w - 2 * pad) / bw, (h - 2 * pad) / bh);
+    const ox = x + (w - bw * s) / 2 - x0 * s, oy = y + (h - bh * s) / 2 - y0 * s;
+    // a faint grid, a square every 100 squares
+    const step = 100 * s;
+    if (step > 12 * dp) {
+      g.strokeStyle = 'rgba(0,0,0,.13)';
+      g.lineWidth = dp;
+      g.beginPath();
+      for (let gx = x + ((ox - x) % step + step) % step; gx < x + w; gx += step) { g.moveTo(gx, y); g.lineTo(gx, y + h); }
+      for (let gy = y + ((oy - y) % step + step) % step; gy < y + h; gy += step) { g.moveTo(x, gy); g.lineTo(x + w, gy); }
+      g.stroke();
+    }
+    g.beginPath();
+    g.moveTo(ox + pts[0] * s, oy + pts[1] * s);
+    for (let i = 2; i + 1 < pts.length; i += 2) g.lineTo(ox + pts[i] * s, oy + pts[i + 1] * s);
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+    g.lineWidth = 2.5 * dp;
+    g.strokeStyle = 'rgba(138,43,30,.8)';
+    g.stroke();
+    g.fillStyle = this.GREEN;
+    g.beginPath();
+    g.arc(ox + pts[0] * s, oy + pts[1] * s, 5 * dp, 0, Math.PI * 2);
+    g.fill();
+    const ex = ox + pts[pts.length - 2] * s, ey = oy + pts[pts.length - 1] * s, r = 5 * dp;
+    g.strokeStyle = this.RED;
+    g.lineWidth = 3 * dp;
+    g.beginPath();
+    g.moveTo(ex - r, ey - r); g.lineTo(ex + r, ey + r);
+    g.moveTo(ex - r, ey + r); g.lineTo(ex + r, ey - r);
+    g.stroke();
+    g.restore();
+  },
+
+  /** A line cut to a width, with "…" at the end. */
+  fit(g, s, max) {
+    if (g.measureText(s).width <= max) return s;
+    while (s.length > 1 && g.measureText(s + '…').width > max) s = s.slice(0, -1);
+    return s + '…';
+  },
+
+  /** The card as a picture to keep: 1080 wide, on the journal's paper. */
+  render(r, photo) {
+    const f = this.facts(r);
+    const w = 1080, u = 2.6;   // "css px" in the picture
+    const photoH = photo ? Math.round(photo.naturalHeight * (w - 120) / photo.naturalWidth) : 0;
+    const h = 1000 + photoH + (photo ? 40 : 0) + f.moments.length * 46 + (f.best ? 50 : 0);
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const g = c.getContext('2d');
+    g.fillStyle = this.PAPER;
+    g.fillRect(0, 0, w, h);
+    let y = 70;
+    g.fillStyle = this.INK;
+    g.font = `bold 64px ${this.SERIF}`;
+    g.fillText(this.fit(g, f.name, w - 120), 60, y + 40);
+    y += 80;
+    g.font = `32px ${this.SANS}`;
+    g.fillStyle = this.INK_SOFT;
+    g.fillText(f.sub, 60, y + 20);
+    y += 46;
+    if (f.dates) {
+      g.fillText(f.dates, 60, y + 20);
+      y += 46;
+    }
+    if (f.end) {
+      g.fillStyle = this.RED;
+      g.font = `italic bold 38px ${this.SERIF}`;
+      g.fillText(f.end + '.', 60, y + 30);
+      y += 60;
+    }
+    // the numbers
+    g.textAlign = 'center';
+    f.nums.forEach(([v, l], i) => {
+      const cx = 60 + (w - 120) * (i + 0.5) / 3;
+      g.fillStyle = this.INK;
+      g.font = `bold 58px ${this.SERIF}`;
+      g.fillText(v, cx, y + 70);
+      g.font = `28px ${this.SANS}`;
+      g.fillStyle = this.INK_SOFT;
+      g.fillText(l, cx, y + 110);
+    });
+    g.textAlign = 'left';
+    y += 140;
+    this.drawTrail(g, 60, y, w - 120, 420, this.trail, u);
+    y += 450;
+    g.textBaseline = 'top';
+    if (f.best) {
+      g.fillStyle = this.INK;
+      g.font = `30px ${this.SANS}`;
+      g.fillText(this.fit(g, 'Best at: ' + f.best, w - 120), 60, y);
+      y += 50;
+    }
+    g.fillStyle = this.INK_SOFT;
+    g.font = `30px ${this.SERIF}`;
+    for (const s of f.moments) {
+      g.fillText(this.fit(g, s, w - 120), 60, y);
+      y += 46;
+    }
+    g.textBaseline = 'alphabetic';
+    if (photo) {
+      y += 20;
+      g.drawImage(photo, 60, y, w - 120, photoH);
+      y += photoH;
+    }
+    g.fillStyle = 'rgba(0,0,0,.5)';
+    g.font = `24px ${this.SANS}`;
+    g.textAlign = 'right';
+    g.fillText('Project Zomboid · Knox Link', w - 60, h - 30);
+    return c;
+  },
+
+  save() {
+    const r = this.r;
+    if (!r) return;
+    const img = $('#rcPhoto');
+    const c = this.render(r, img && img.complete && img.naturalWidth ? img : null);
+    c.toBlob((b) => {
+      if (!b) { toast("Couldn't save it", true); return; }
+      const url = URL.createObjectURL(b);
+      download(url, `KnoxLink-${String(r.name || '').replace(/[^A-Za-z0-9]+/g, '-')}-${r.id}.png`);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }, 'image/png');
+  },
+};
+
+// =================================================================== the AI service (for Ask)
+
+/**
+ * Talks to the AI service the player picked: Claude (Anthropic), OpenAI, Google Gemini, OpenRouter,
+ * or any OpenAI-compatible server (a model on a PC with Ollama or LM Studio). The same services,
+ * models and words as the Android app's AiClient. Only the prompt it is given goes out, with the
+ * player's own key, straight from this browser to the service; the key is kept in this browser only.
+ */
+const Ai = {
+  PROVIDERS: ['claude', 'openai', 'gemini', 'openrouter', 'custom'],
+
+  label: (p) => ({ openai: 'OpenAI', gemini: 'Gemini', openrouter: 'OpenRouter', custom: 'Custom' }[p] || 'Claude'),
+
+  /** A few good models for the service, the cheapest first (the first one is the default). */
+  models(p) {
+    switch (p) {
+      case 'openai': return ['gpt-5-mini', 'gpt-5', 'gpt-4.1-mini'];
+      case 'gemini': return ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
+      case 'openrouter': return ['anthropic/claude-haiku-4.5', 'openai/gpt-5-mini', 'google/gemini-2.5-flash'];
+      case 'custom': return [];
+      default: return ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'];
+    }
+  },
+
+  modelHint(p) {
+    switch (p) {
+      case 'openai': return 'The mini models cost the least and answer well enough.';
+      case 'gemini': return 'Flash is cheap and quick.';
+      case 'openrouter': return 'Any model on OpenRouter, written as maker/model.';
+      case 'custom': return 'The model\'s name on your server, as it lists it.';
+      default: return 'Haiku costs the least. Sonnet and Opus write better and cost more.';
+    }
+  },
+
+  /** The service, model, key (one per service, so trying another doesn't lose the first) and a custom server's address. */
+  config() {
+    let p = load('kl.aiProvider') || 'claude';
+    if (!this.PROVIDERS.includes(p)) p = 'claude';
+    const model = load('kl.aiModel_' + p);
+    return { provider: p, model: (model == null ? this.models(p)[0] || '' : model).trim(), key: (load('kl.aiKey_' + p) || '').trim(),
+      base: (load('kl.aiBase') || '').trim() };
+  },
+
+  /** What's still missing before it can be used, or null. */
+  missing(c) {
+    if (c.provider === 'custom' && !c.base) return "Type your server's address";
+    if (!c.model) return "Type the model's name";
+    if (c.provider !== 'custom' && !c.key) return 'Add your API key';
+    return null;
+  },
+
+  describe(c) { return this.label(c.provider) + ' · ' + c.model; },
+
+  shorten: (s, max) => (s.length <= max ? s : s.slice(0, max - 1) + '…'),
+
+  /**
+   * Sends one prompt and returns the model's text (or throws an Error in a few plain words for a toast).
+   * maxTokens is what the answer itself needs; models that think before they answer get room for that on top.
+   */
+  async complete(c, system, user, maxTokens) {
+    let text;
+    if (c.provider === 'claude') text = await this.claude(c, system, user, maxTokens);
+    else if (c.provider === 'gemini') text = await this.gemini(c, system, user, Math.max(maxTokens * 4, 1200));
+    else text = await this.chat(c, system, user, Math.max(maxTokens * 4, 1200));
+    text = this.clean(text);
+    if (!text) throw new Error('The model sent back no text');
+    return text;
+  },
+
+  async claude(c, system, user, maxTokens) {
+    // the current models think before they answer, and the thinking counts toward max_tokens:
+    // room for it, and the low effort level
+    const body = { model: c.model, max_tokens: Math.max(maxTokens * 4, 1200), system, messages: [{ role: 'user', content: user }],
+      output_config: { effort: 'low' } };
+    const headers = { 'x-api-key': c.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+    let r;
+    try {
+      r = await this.post('https://api.anthropic.com/v1/messages', body, 45000, headers);
+    } catch (e) {
+      // older models don't know the effort setting: once more without it
+      const why = String(e.message);
+      if (!why.includes('effort') && !why.includes('output_config')) throw e;
+      delete body.output_config;
+      r = await this.post('https://api.anthropic.com/v1/messages', body, 45000, headers);
+    }
+    const text = (Array.isArray(r.content) ? r.content : []).filter((b) => b && b.type === 'text').map((b) => String(b.text || '')).join('');
+    if (!text && r.stop_reason === 'refusal') throw new Error('The model declined to write this page');
+    if (!text && r.stop_reason === 'max_tokens') throw new Error('The model ran out of room before it wrote anything');
+    return text;
+  },
+
+  async gemini(c, system, user, maxTokens) {
+    const model = c.model.startsWith('models/') ? c.model.slice(7) : c.model;
+    const body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text: user }] }],
+      generationConfig: { maxOutputTokens: maxTokens } };
+    const r = await this.post(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      body, 45000, { 'x-goog-api-key': c.key });
+    const first = Array.isArray(r.candidates) ? r.candidates[0] : null;
+    if (!first) {
+      const why = r.promptFeedback && r.promptFeedback.blockReason;
+      throw new Error(why ? `The service blocked the request (${why})` : 'The model sent back no text');
+    }
+    const parts = first.content && Array.isArray(first.content.parts) ? first.content.parts : [];
+    const text = parts.filter((p) => p && !p.thought && p.text != null).map((p) => String(p.text)).join('');
+    if (!text && first.finishReason === 'MAX_TOKENS') throw new Error('The model ran out of room before it wrote anything');
+    return text;
+  },
+
+  /** OpenAI's chat completions, which OpenRouter, Ollama, LM Studio and most others speak too. */
+  async chat(c, system, user, maxTokens) {
+    const openai = c.provider === 'openai';
+    const base = openai ? 'https://api.openai.com/v1' : c.provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : this.serverUrl(c.base);
+    const body = { model: c.model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
+    // OpenAI's newer models only take max_completion_tokens; the others still read max_tokens
+    body[openai ? 'max_completion_tokens' : 'max_tokens'] = maxTokens;
+    const r = await this.post(base + '/chat/completions', body, c.provider === 'custom' ? 120000 : 45000,
+      c.key ? { Authorization: 'Bearer ' + c.key } : {});
+    const first = Array.isArray(r.choices) ? r.choices[0] : null;
+    const msg = first && first.message;
+    if (!msg) throw new Error('The model sent back no text');
+    if (msg.refusal) throw new Error('The model declined to write this page');
+    const text = msg.content == null ? '' : String(msg.content);
+    if (!text.trim() && first.finish_reason === 'length') throw new Error('The model ran out of room before it wrote anything');
+    return text;
+  },
+
+  /** A server address as typed ("192.168.1.20:11434") -> its OpenAI-style API root ("http://192.168.1.20:11434/v1"). */
+  serverUrl(typed) {
+    let s = String(typed || '').trim();
+    while (s.endsWith('/')) s = s.slice(0, -1);
+    if (s.endsWith('/chat/completions')) s = s.slice(0, -'/chat/completions'.length);
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s)) s = 'http://' + s;
+    let path = '';
+    try { path = new URL(s).pathname; } catch (e) { path = ''; }
+    if (!path || path === '/') s += '/v1';
+    return s;
+  },
+
+  async post(url, body, ms, headers) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), ms);
+    let res, text;
+    try {
+      // nothing about the player or the device: no cookies, no referrer
+      res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers },
+        body: JSON.stringify(body), signal: ctl.signal, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+      text = await res.text();
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error('No answer in time');
+      if (navigator.onLine === false) throw new Error('No internet, or the address is wrong');
+      let host = url;
+      try { host = new URL(url).host; } catch (x) { /* as typed */ }
+      // a browser can't tell a server that's off from one that doesn't let this page in
+      throw new Error(`Couldn't reach ${host}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (res.status < 200 || res.status >= 300) throw new Error(this.httpError(res.status, text));
+    try { return JSON.parse(text); } catch (e) { throw new Error("The service's answer didn't make sense"); }
+  },
+
+  /** "The key wasn't accepted: <the service's own words>". */
+  httpError(code, body) {
+    let msg = null;
+    try {
+      let o = JSON.parse(body);
+      if (Array.isArray(o)) o = o[0];
+      if (o && typeof o === 'object') {
+        const e = o.error;
+        if (e && typeof e === 'object') msg = e.message || null;
+        else if (typeof e === 'string') msg = e;
+        if (!msg && typeof o.message === 'string') msg = o.message;
+      }
+    } catch (e) { /* not JSON */ }
+    let what;
+    if (code === 401 || code === 403) what = "The key wasn't accepted";
+    else if (code === 404) what = 'Model not found';
+    else if (code === 429) what = 'Too many requests, or no credit left';
+    else if (code === 400) what = 'The service refused the request';
+    else what = code >= 500 ? 'The service is having trouble' : 'Error ' + code;
+    return msg && String(msg).trim() ? what + ': ' + this.shorten(String(msg).trim(), 140) : what;
+  },
+
+  /** The text alone: no thinking, markdown, heading or quotes around it. */
+  clean(s) {
+    let t = String(s || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\r/g, '');
+    t = t.split('**').join('').split('__').join('');
+    t = t.replace(/^#+\s*/gm, '').trim();
+    // a "Day 12" or "Day 12 - July 20" heading line
+    t = t.replace(/^(day\s+\d+[^\n]{0,40})\n+/i, '').trim();
+    if (t.length > 1 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith('“') && t.endsWith('”')))) t = t.slice(1, -1).trim();
+    t = t.replace(/\n{3,}/g, '\n\n');
+    if (t.length > 1500) {
+      const cut = Math.max(t.lastIndexOf('. ', 1500), t.lastIndexOf('! ', 1500), t.lastIndexOf('? ', 1500));
+      t = cut > 750 ? t.slice(0, cut + 1) : t.slice(0, 1499) + '…';
+    }
+    return t;
+  },
+
+  /** The AI's sheet: the service, the model, the key (or the address of a server of your own) and a test. Saved as it's typed. */
+  sheet() {
+    const c = this.config(), p = c.provider, custom = p === 'custom', models = this.models(p);
+    let html = sheetHead('AI', 'Who answers in Ask: an AI service you pick, with your own key.')
+      + `<p class="ai-hint">It gets only your question and your character's situation: what they carry, their wounds, their skills, where they are.</p>
+        <p class="sh-label ai-h">Service</p><div class="ai-chips">${this.PROVIDERS.map((x) =>
+          `<button class="ai-chip${x === p ? ' on' : ''}" data-act="prov" data-p="${x}">${this.label(x)}</button>`).join('')}</div>`;
+    if (custom) {
+      html += `<p class="sh-label ai-h">Server address</p><input class="field" id="aiBase" value="${esc(c.base)}" placeholder="http://192.168.1.20:11434/v1"
+          autocomplete="off" spellcheck="false" autocapitalize="off" inputmode="url">
+        <p class="ai-hint">Any server that speaks OpenAI's API. For a model on your PC, Ollama is at http://PC-ADDRESS:11434/v1 and LM Studio at
+          http://PC-ADDRESS:1234/v1. Let it accept connections from your network (Ollama: OLLAMA_HOST=0.0.0.0) and from this page
+          (Ollama: OLLAMA_ORIGINS=*; LM Studio: Enable CORS).</p>`;
+    }
+    html += `<p class="sh-label ai-h">Model</p><input class="field" id="aiModel" value="${esc(c.model)}" placeholder="${custom ? 'llama3.2' : esc(models[0] || '')}"
+        autocomplete="off" spellcheck="false" autocapitalize="off">`
+      + (models.length ? `<div class="ai-chips sm">${models.map((m) =>
+        `<button class="ai-chip sm${m === c.model ? ' on' : ''}" data-act="model" data-m="${esc(m)}">${esc(m)}</button>`).join('')}</div>` : '')
+      + `<p class="ai-hint">${esc(this.modelHint(p))}</p>
+        <p class="sh-label ai-h">API key</p><div class="ai-key"><input class="field" id="aiKey" type="password" value="${esc(c.key)}"
+          placeholder="${custom ? 'Not needed for most servers' : 'Paste your key here'}" autocomplete="off" spellcheck="false" autocapitalize="off">
+          <button class="btn" data-act="show">Show</button></div>
+        <p class="ai-hint">${custom ? "Leave it empty if your server doesn't ask for one. " : ''}Kept in this browser only.</p>
+        <div class="ai-test"><button class="btn primary" data-act="test">Test</button><span id="aiResult"></span></div>`;
+    openSheet(html, {
+      prov: (b) => {
+        if (b.dataset.p === p) return;
+        store('kl.aiProvider', b.dataset.p);
+        this.changed();
+        this.sheet();
+      },
+      model: (b) => {
+        store('kl.aiModel_' + p, b.dataset.m);
+        this.changed();
+        this.sheet();
+      },
+      show: (b) => {
+        const k = $('#aiKey');
+        const shown = k.type === 'text';
+        k.type = shown ? 'password' : 'text';
+        b.textContent = shown ? 'Show' : 'Hide';
+      },
+      test: () => this.test(),
+    }, 'ai');
+    const watch = (sel, key) => {
+      const el = $(sel);
+      if (el) el.addEventListener('input', () => { store(key, el.value.trim()); this.changed(); });
+    };
+    watch('#aiBase', 'kl.aiBase');
+    watch('#aiModel', 'kl.aiModel_' + p);
+    watch('#aiKey', 'kl.aiKey_' + p);
+  },
+
+  /** The settings changed: Ask says who answers now. */
+  changed() { Ask.status(); },
+
+  async test() {
+    const out = $('#aiResult');
+    const say = (cls, text) => { if (out.isConnected) { out.className = cls; out.textContent = text; } };
+    const cfg = this.config(), miss = this.missing(cfg);
+    if (miss) { say('bad', miss); return; }
+    say('', 'Testing…');
+    try {
+      const text = await this.complete(cfg, 'You check that a connection works.', 'Reply with just the word OK.', 20);
+      say('good', `It works. The model said “${this.shorten(text.replace(/\n/g, ' '), 40)}”`);
+    } catch (e) {
+      say('bad', e.message);
+    }
+  },
+};
+
+// =================================================================== Ask
+
+/**
+ * "Ask": questions about the game, answered by the AI the player set up (any of its services), with
+ * the character's situation (KnoxLink_Ask.lua, on "ask") so the answer fits what they have and
+ * where they are. Nothing goes out until a question is asked; one request each.
+ */
+const Ask = {
+  STARTERS: ['What should I do next?', 'How do I treat my wounds?', 'What can I make with what I have?',
+    'Where should I look for food and water?', 'How do I get a generator running?'],
+
+  SYSTEM: 'You help someone playing Project Zomboid, Build 42, on a second screen next to the game. '
+    + 'Answer their question about the game: its mechanics, crafting, building, farming, cooking, medicine, fighting, '
+    + 'vehicles and how to survive. Use the character\'s situation given below: say which of the things they have, or '
+    + 'that are within reach, they can use, and what they still need. Keep it short and practical: a few sentences or a '
+    + 'short list, about 150 words at most unless the question needs steps. Use the game\'s own names for items, skills '
+    + 'and menus. Build 42 changed a lot from Build 41 (crafting, farming, animals, building); when you aren\'t sure '
+    + 'something works the same way in Build 42, say so rather than guess, and never make up items or recipes. '
+    + 'Don\'t mention the situation summary itself; just use it. Plain text, no markdown headings.',
+
+  init() {
+    this.history = [];   // {k: "q" (asked), "a" (answered) or "e" (what went wrong), s}
+    this.text = '';      // the character's situation
+    this.name = '';
+    this.busy = false;
+    $('#askForm').addEventListener('submit', (e) => { e.preventDefault(); this.send(); });
+    $('#askNew').addEventListener('click', () => { this.history = []; this.render(); });
+    $('#askAi').addEventListener('click', () => Ai.sheet());
+    $('#askList').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-starter]');
+      if (b) this.ask(this.STARTERS[Number(b.dataset.starter)]);
+    });
+    this.render();
+  },
+
+  /** The character's situation, as the game tells it while this tab is open. */
+  situation(d) {
+    this.text = String(d.text || '');
+    const name = String(d.name || '');
+    if (name !== this.name) { this.name = name; this.status(); }
+  },
+
+  /** The tab came into view: the AI's settings may have changed meanwhile. */
+  shown() { this.render(); },
+
+  send() {
+    const input = $('#askInput');
+    const q = input.value.trim();
+    if (!q) return;
+    input.value = '';
+    this.ask(q);
+  },
+
+  async ask(q) {
+    if (this.busy || !q) return;
+    const cfg = Ai.config(), missing = Ai.missing(cfg);
+    if (missing) {
+      toast(missing + ' (AI settings)', true);
+      Ai.sheet();
+      return;
+    }
+    this.busy = true;
+    this.history.push({ k: 'q', s: q });
+    this.render();
+    let user = "The character's situation:\n" + (this.text || '(not known yet)') + '\n\n';
+    // the last few turns are enough to follow up on
+    const earlier = this.history.slice(Math.max(0, this.history.length - 9), -1).filter((h) => h.k !== 'e');
+    if (earlier.length) user += 'Earlier in this conversation:\n' + earlier.map((h) => (h.k === 'q' ? 'Player: ' : 'You: ') + h.s + '\n').join('') + '\n';
+    user += 'The player asks: ' + q;
+    let k = 'a', s;
+    try {
+      s = await Ai.complete(cfg, this.SYSTEM, user, 700);
+    } catch (e) {
+      k = 'e';
+      s = String((e && e.message) || 'Network error');
+    }
+    this.busy = false;
+    this.history.push({ k, s });
+    this.render();
+  },
+
+  status() {
+    const el = $('#askStatus');
+    const cfg = Ai.config(), missing = Ai.missing(cfg);
+    el.textContent = missing ? 'Set up an AI first: tap AI' : `Answered by ${Ai.describe(cfg)}${this.name ? ` · knows how ${this.name} is doing` : ''}`;
+    el.classList.toggle('warn', !!missing);
+  },
+
+  render() {
+    this.status();
+    const list = $('#askList');
+    if (!this.history.length) {
+      list.innerHTML = `<p class="ask-hello">Questions about the game, answered with your character's situation in mind: what you carry, your wounds,
+        your skills, where you are. It uses the AI you set up under AI, with your own key; each question is one request.</p>`
+        + this.STARTERS.map((s, i) => `<button class="ask-starter" data-starter="${i}">${esc(s)}</button>`).join('');
+      return;
+    }
+    list.innerHTML = this.history.map((h) => `<p class="${h.k === 'q' ? 'ask-q' : h.k === 'e' ? 'ask-a err' : 'ask-a'}">${esc(h.s)}</p>`).join('')
+      + (this.busy ? '<p class="ask-wait">Thinking…</p>' : '');
+    requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
   },
 };

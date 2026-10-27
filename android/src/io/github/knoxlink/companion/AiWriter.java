@@ -56,6 +56,11 @@ final class AiWriter {
         return instance;
     }
 
+    /** The journal's writer, as it is (for its settings sheet elsewhere), or null before the journal made it. */
+    static AiWriter existing() {
+        return instance;
+    }
+
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService net = Executors.newSingleThreadExecutor(r -> {
         Thread th = new Thread(r, "knoxlink-ai");

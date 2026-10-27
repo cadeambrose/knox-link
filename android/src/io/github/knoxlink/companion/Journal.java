@@ -31,7 +31,7 @@ final class Journal extends ScrollView implements AiWriter.Listener {
     private final Host host;
     private final Theme t;
     private final AiWriter writer;
-    private final LinearLayout col, pages, writeBox;
+    private final LinearLayout col, pages, writeBox, found;
     private final TextView status;
     private final EditText input;
     private final Set<Integer> unfolded = new HashSet<>();   // pages whose "what happened" is open
@@ -63,7 +63,23 @@ final class Journal extends ScrollView implements AiWriter.Listener {
         pick.setBackground(Ui.pressable(t, t.surface2, 10));
         pick.setOnClickListener(v -> openWriter());
         head.addView(pick, Ui.margins(Ui.lp(-2, -2), t.dp(10), 0, 0, 0));
+        // the scrapbook: a photo of the game for today's page (a camera in the game, in immersion)
+        TextView snap = Ui.text(c, t, "Photo", 13.5f, t.text2, true);
+        Drawable cam = t.icon("camera", t.text2);
+        cam.setBounds(0, 0, t.dp(16), t.dp(16));
+        snap.setCompoundDrawables(cam, null, null, null);
+        snap.setCompoundDrawablePadding(t.dp(6));
+        snap.setGravity(Gravity.CENTER_VERTICAL);
+        snap.setPadding(t.dp(12), t.dp(8), t.dp(14), t.dp(8));
+        snap.setBackground(Ui.pressable(t, t.surface2, 10));
+        snap.setOnClickListener(v -> host.command("photo", new JSONObject(), "Photo taken"));
+        head.addView(snap, Ui.margins(Ui.lp(-2, -2), t.dp(8), 0, 0, 0));
         col.addView(head, Ui.margins(Ui.lp(-1, -2), t.dp(2), 0, 0, t.dp(10)));
+
+        // diaries left behind by the dead, that this character has found
+        found = Ui.col(c);
+        found.setVisibility(GONE);
+        col.addView(found, Ui.margins(Ui.lp(-1, -2), 0, 0, 0, t.dp(14)));
 
         writeBox = Ui.col(c);
         writeBox.setBackground(paper(14));
@@ -116,6 +132,14 @@ final class Journal extends ScrollView implements AiWriter.Listener {
         data = d;
         writer.journal(d);
         render();
+    }
+
+    /** The left-behind diaries the character has with them or within reach ("diaries"). */
+    void diaries(JSONObject d) {
+        found.removeAllViews();
+        View card = Diaries.card(getContext(), host, d);
+        if (card != null) found.addView(card, Ui.lp(-1, -2));
+        found.setVisibility(card != null ? VISIBLE : GONE);
     }
 
     /** The writer started or finished a page, or its settings changed. */
@@ -176,6 +200,9 @@ final class Journal extends ScrollView implements AiWriter.Listener {
             if (ai && hasFacts(p)) prose.setOnLongClickListener(v -> { rewriteSheet(d); return true; });
             page.addView(prose, Ui.lp(-1, -2));
         }
+        // the day's photos, like prints tucked in the page
+        JSONArray photos = Screens.Json.arr(p.opt("ph"));
+        if (photos.length() > 0) page.addView(Photos.strip(c, host, photos, true), Ui.margins(Ui.lp(-1, -2), 0, t.dp(10), 0, t.dp(2)));
         boolean writing = ai && writer.writing(d);
         if (ai && (hasEntry || writing)) {
             TextView hint = Ui.text(c, t, writing ? "writing…" : aiText != null ? "written by AI" : "offline", 11.5f, INK_SOFT, false);
@@ -236,7 +263,7 @@ final class Journal extends ScrollView implements AiWriter.Listener {
             }
             lines++;
         }
-        if (lines == 0 && !hasEntry) {
+        if (lines == 0 && !hasEntry && photos.length() == 0) {
             TextView quiet = Ui.text(c, t, d == today ? "Nothing written yet today." : "A quiet day.", 14, INK_SOFT, false);
             quiet.setTypeface(Typeface.create("serif", Typeface.ITALIC));
             page.addView(quiet);

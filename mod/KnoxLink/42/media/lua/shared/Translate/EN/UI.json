@@ -36,5 +36,8 @@
     "UI_KnoxLink_OptKeyLight": "Light on / off",
     "UI_KnoxLink_OptKeyLight_tip": "Turns your flashlight or lantern on or off, taking it out of your bag if needed.",
     "UI_KnoxLink_OptKeyWeapon": "Best weapon",
-    "UI_KnoxLink_OptKeyWeapon_tip": "Takes your best melee weapon in hand."
+    "UI_KnoxLink_OptKeyWeapon_tip": "Takes your best melee weapon in hand.",
+    "UI_KnoxLink_OptKeyPhoto": "Take a photo",
+    "UI_KnoxLink_OptKeyPhoto_tip": "Takes a photo of what's on the screen for today's journal page (with immersion on, you need a camera).",
+    "UI_KnoxLink_DiaryOf": "%1's diary"
 }

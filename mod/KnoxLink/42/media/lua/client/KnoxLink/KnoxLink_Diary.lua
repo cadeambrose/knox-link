@@ -332,6 +332,12 @@ local SKILL = {
 }
 
 local BASE = { "I've made this place my base.", "Found somewhere to call home, for now.", "Settled in here. Not much, but it's mine." }
+local PHOTO = {
+    "Took a picture today. Someone should remember what this looked like.",
+    "I took a photo. Strange, keeping a record of all this.",
+    "Snapped a picture. I don't know who I'm keeping it for.",
+}
+local PHOTO_OF = { "Took a picture: {photo}.", "I took a photo of {photo}. Worth remembering." }
 local BASE_JOB = {
     carpenter = "Tomorrow I start boarding up the windows.",
     constructionworker = "Tomorrow I start boarding up the windows.",
@@ -445,7 +451,7 @@ function KL.diaryEntry(ctx)
     end
 
     -- what the page's lines say, by kind (the journal adds them in the order they happened)
-    local sleep, car, bite, sick, base = nil, nil, nil, nil, nil
+    local sleep, car, bite, sick, base, photo = nil, nil, nil, nil, nil, nil
     local places, hurts, skills = {}, {}, {}
     local placeAt, afterTravel = nil, 0
     for i, l in ipairs(lines) do
@@ -480,6 +486,8 @@ function KL.diaryEntry(ctx)
             table.insert(skills, { id = l.a, name = name, i = i })
         elseif k == "base" then
             if not base then base = { i = i } end
+        elseif k == "photo" then
+            if not photo then photo = { what = string.match(s, "^Took a photo: (.+)%.$"), i = i } end
         end
     end
     local kills = p.kills or 0
@@ -659,6 +667,15 @@ function KL.diaryEntry(ctx)
     if base then
         add(pick(ctx, "base", BASE), base.i)
         if BASE_JOB[ctx.job] then add(BASE_JOB[ctx.job], base.i + 0.1, 3) end
+    end
+
+    if photo then
+        if photo.what then
+            vars.photo = string.lower(string.sub(photo.what, 1, 1)) .. string.sub(photo.what, 2)
+            add(fill(pick(ctx, "photoof", PHOTO_OF), vars), photo.i, 2)
+        else
+            add(pick(ctx, "photo", PHOTO), photo.i, 2)
+        end
     end
 
     -- how it felt: the strongest feeling of the day, sometimes a second one
