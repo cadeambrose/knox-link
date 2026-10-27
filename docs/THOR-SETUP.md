@@ -69,7 +69,28 @@ Project Viewpoint's renderer needs desktop OpenGL 4.5, which only some of Zomdro
    **6277 3D models for Viewpoint [sour_kisel]** (Workshop 3810302175, about 430 MB).
 3. In Zomdroid set **Renderer: ZINK_ZFA** (Vulkan driver TURNIP_740). For the normal view, switch back to
    MOBILEGLUES.
-4. Viewpoint settings that pay off on the Thor (its settings window, or Knox Link's modes):
+4. Faster and sharper (the author's Thor since 2026-10-27; experimental, see below how to go back):
+   - **Vulkan driver: DD-Turnip v0.3.4** (Droid-Deck/Drivers on GitHub, Mesa 27.0-devel). Take
+     `android/libvulkan_freedreno.so` out of its zip, import it with Zomdroid > Import/Export Custom Driver,
+     and pick **CUSTOM_DRIVER**. TURNIP_740 and the other Turnip builds before Mesa's fix of 2026-10-08
+     (commit e984ef294eaf) turn the game's "is the GPU done yet?" checks into waits, so the CPU and the GPU
+     take turns instead of working side by side.
+   - **Environment variables** (instance settings > Advanced):
+     `TU_DEBUG=sysmem KNOXTHOR3D_RENDER_SCALE=60 KNOXTHOR3D_HASH=2`. `TU_DEBUG=sysmem` draws straight to
+     memory instead of in tiles (Viewpoint's passes are heavy on geometry, and tiling sorts all of it first).
+     The other two are KnoxThor3D's (from this repository's `extras/KnoxThor3D`, newer than the 1.1.0
+     download): the 3D view is drawn at 60 % and rebuilt to full size by Viewpoint's TAA+, and the world's
+     chunks are left out of Viewpoint's translucent pass, which sent them all through the GPU a second time
+     for their glass and soft edges (about 4 ms a frame). Window panes are then dithered into the main pass
+     (they look a little grainy); `KNOXTHOR3D_HASH=1` drops the panes for clear glass, `0` is Viewpoint's own.
+   - **Resolution 100 %** and Viewpoint's anti-aliasing on **TAA+** (both of the above need TAA).
+   - Frame cap 60.
+
+   Measured in a house, third person, playing: **60 fps held** standing and walking (lowest 41–50), where
+   TURNIP_740 at 60 % resolution made 43–47. It draws about 9–10 W, so the fan runs high with the stock
+   curve (see Heat and battery). To go back: Vulkan driver TURNIP_740, clear the environment variables,
+   resolution 60 %.
+5. Viewpoint settings that pay off on the Thor (its settings window, or Knox Link's modes):
 
 | Setting | Value | Effect |
 | --- | --- | --- |

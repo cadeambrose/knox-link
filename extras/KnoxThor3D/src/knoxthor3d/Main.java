@@ -22,7 +22,11 @@ import zombie.gameStates.ChooseGameInfo;
  * off for that session; the save's own mod list is untouched. Switching Zomdroid's renderer is
  * then the only change between the 3D view and the everyday one.
  *
- * Also makes Viewpoint lighter there (the crosshair depth read, DepthRead).
+ * Also makes Viewpoint lighter there (the crosshair depth read, DepthRead), and on ZINK_ZFA lets
+ * the CPU and the GPU work on frames side by side instead of taking turns (Present). It writes
+ * Viewpoint's per-draw data into a mapped buffer so the GPU's passes stay whole (Stream), can draw
+ * the 3D view at a lower resolution rebuilt by Viewpoint's TAA (Scale), and can leave the world's
+ * chunks out of the translucent pass (Hash).
  * Needs to be on in the main menu's mod list too, so it's already running when a save loads.
  * On a PC (no Zomdroid) nothing here does anything.
  */
@@ -135,6 +139,25 @@ public class Main {
         @Patch.OnEnter
         public static void enter() {
             if (!ZfaFunctions.tried && Main.zfa()) ZfaFunctions.install();
+        }
+    }
+
+    /** On ZINK_ZFA: show each frame without waiting for the GPU to finish drawing it (Present). */
+    @Patch(className = "org.lwjgl.glfw.GLFW", methodName = "glfwSwapBuffers", strictMatch = true)
+    public static final class Swap {
+        // (strictMatch picks the overload by these parameters, so the window has to be declared)
+        @Patch.OnEnter(skipOn = true)
+        public static boolean enter(@Patch.Argument(0) long window) {
+            return Main.zfa() && Present.swap();   // true = shown here (Zomdroid's swap is skipped)
+        }
+    }
+
+    /** Vanilla mode at a lower internal resolution, upscaled by Viewpoint's own TAA (Scale). */
+    @Patch(className = "viewpoint.platform.Pipeline", methodName = "of")
+    public static final class RenderScale {
+        @Patch.OnEnter
+        public static void enter(@Patch.Argument(value = 0, readOnly = false) java.util.Map<Object, String> knobs) {
+            knobs = Scale.apply(knobs);
         }
     }
 
