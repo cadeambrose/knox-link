@@ -45,6 +45,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             {"map", "Map", "ui/Sidebar/128/Map_Off_128.png", "ui/Sidebar/128/Map_On_128.png", "map"},
             {"vitals", "Vitals", "ui/Sidebar/128/Heart_Off_128.png", "ui/Sidebar/128/Heart_On_128.png", "vitals"},
             {"gear", "Gear", "ui/Sidebar/128/Inventory_Off_128.png", "ui/Sidebar/128/Inventory_On_128.png", "gear"},
+            {"weapons", "Weapons", null, null, "weapon"},
             {"skills", "Skills", null, null, "skills"},
             {"comms", "Radio", null, null, "radio"},
             {"base", "Base", null, null, "home"},
@@ -81,7 +82,8 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     private Screens.Settings settings;
     private Journal journal;
     private AskScreen ask;
-    private JSONObject lootData, craftData, journalData;
+    private WeaponsScreen weapons;
+    private JSONObject lootData, craftData, journalData, weaponsData;
     // the floor plan, what the character remembers, the diaries they found, "Ask"'s situation
     private JSONObject planData, memoryData, diariesData, askData;
     /** The game server's key for this session (hello): photos and the way walked need it, from another device. */
@@ -215,8 +217,9 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
 
     @Override
     public void onBackPressed() {
-        // Back closes a sheet, then returns to the map; at the map, twice in a row closes Knox Link.
+        // Back closes a sheet, then a weapon's page, then returns to the map; at the map, twice in a row closes Knox Link.
         if (sheetLayer.getVisibility() == View.VISIBLE) closeSheet();
+        else if ("weapons".equals(tab) && weapons.back()) backAt = 0;
         else if (!"map".equals(tab)) setTab("map");
         else if (System.currentTimeMillis() - backAt < 2500) closeApp();
         else {
@@ -654,10 +657,12 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         baseScreen = new Screens.Base(this, this);
         journal = new Journal(this, this);
         ask = new AskScreen(this, this);
+        weapons = new WeaponsScreen(this, this);
         car = new Screens.Car(this, this);
         settings = new Screens.Settings(this, this, this);
         addScreen("vitals", vitals);
         addScreen("gear", gear);
+        addScreen("weapons", weapons);
         addScreen("skills", skills);
         addScreen("comms", comms);
         addScreen("base", baseScreen);
@@ -687,6 +692,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         if (journalData != null) journal.journal(journalData);
         if (diariesData != null) journal.diaries(diariesData);
         if (askData != null) ask.situation(askData);
+        if (weaponsData != null) weapons.weapons(weaponsData);
         if (planData != null) map.setPlan(planData);
         if (memoryData != null) map.setMemory(memoryData);
         map.setTrailShown(prefs.getBoolean("trail", false));
@@ -1724,6 +1730,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         }
         if ("journal".equals(tab)) { c.put("journal"); c.put("diaries"); }
         if ("ask".equals(tab)) c.put("ask");
+        if ("weapons".equals(tab)) c.put("weapons");
         if ("skills".equals(tab)) c.put("skills");
         if ("map".equals(tab)) {
             c.put("marks");
@@ -1924,6 +1931,10 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             case "ask":
                 askData = d;
                 ask.situation(d);
+                break;
+            case "weapons":
+                weaponsData = d;
+                weapons.weapons(d);
                 break;
             case "menu":
                 // the game's own menu for something a screen asked about

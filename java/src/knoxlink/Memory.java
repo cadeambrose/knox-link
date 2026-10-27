@@ -544,6 +544,74 @@ final class Memory {
         KnoxServer.get().publish("seen", Json.write(out));
     }
 
+    /** One place a thing was seen, for the screens: {n, c, ic, cat, b, rm, town, x, y, z, d, dir, h, body}. */
+    private static Map<String, Object> where(Box b, int i, int px, int py, int pz, double now) {
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("t", b.types[i]);
+        r.put("n", b.names[i]);
+        r.put("c", b.counts[i]);
+        if (i < b.icons.length && !b.icons[i].isEmpty()) r.put("ic", b.icons[i]);
+        r.put("cat", b.cats[i]);
+        r.put("b", b.name);
+        String room = roomLabel(b.room);
+        if (room != null) r.put("rm", room);
+        String town = townAt(b.x, b.y);
+        if (town != null) r.put("town", town);
+        r.put("x", b.x);
+        r.put("y", b.y);
+        r.put("z", b.z);
+        r.put("d", (int) Math.round(Math.hypot(b.x + 0.5 - px, b.y + 0.5 - py) + Math.abs(b.z - pz) * 3));
+        String dd = dir(b.x - px, b.y - py);
+        if (!dd.isEmpty()) r.put("dir", dd);
+        r.put("h", Math.max(0, Math.round((now - b.at) * 10) / 10.0));
+        if (b.body) r.put("body", true);
+        return r;
+    }
+
+    /** The nearest place each of these item types was seen: {type: where}, for the gunsmith's missing parts. */
+    static synchronized Map<String, Object> nearest(List<String> types) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        IsoPlayer p = IsoPlayer.getInstance();
+        int px = p == null ? 0 : (int) Math.floor(p.getX()), py = p == null ? 0 : (int) Math.floor(p.getY());
+        int pz = p == null ? 0 : (int) Math.floor(p.getZ());
+        double now = GameTime.getInstance().getWorldAgeHours();
+        HashMap<String, Object[]> best = new HashMap<>();
+        HashSet<String> wanted = new HashSet<>(types);
+        for (Box b : boxes.values()) {
+            for (int i = 0; i < b.types.length; i++) {
+                if (!wanted.contains(b.types[i])) continue;
+                double d = Math.hypot(b.x + 0.5 - px, b.y + 0.5 - py) + Math.abs(b.z - pz) * 3;
+                Object[] cur = best.get(b.types[i]);
+                if (cur == null || d < (Double) cur[0]) best.put(b.types[i], new Object[]{d, b, i});
+            }
+        }
+        for (Map.Entry<String, Object[]> e : best.entrySet()) out.put(e.getKey(), where((Box) e.getValue()[1], (Integer) e.getValue()[2], px, py, pz, now));
+        return out;
+    }
+
+    /** Things seen whose category has a word ("weapon"): one row a type, the nearest place, nearest first. */
+    static synchronized List<Object> kinds(String word, int max) {
+        IsoPlayer p = IsoPlayer.getInstance();
+        int px = p == null ? 0 : (int) Math.floor(p.getX()), py = p == null ? 0 : (int) Math.floor(p.getY());
+        int pz = p == null ? 0 : (int) Math.floor(p.getZ());
+        double now = GameTime.getInstance().getWorldAgeHours();
+        String w = word == null ? "" : word.toLowerCase(Locale.ROOT);
+        HashMap<String, Object[]> best = new HashMap<>();
+        for (Box b : boxes.values()) {
+            for (int i = 0; i < b.types.length; i++) {
+                if (!b.cats[i].toLowerCase(Locale.ROOT).contains(w)) continue;
+                double d = Math.hypot(b.x + 0.5 - px, b.y + 0.5 - py) + Math.abs(b.z - pz) * 3;
+                Object[] cur = best.get(b.types[i]);
+                if (cur == null || d < (Double) cur[0]) best.put(b.types[i], new Object[]{d, b, i});
+            }
+        }
+        List<Object[]> sorted = new ArrayList<>(best.values());
+        sorted.sort((a, c) -> Double.compare((Double) a[0], (Double) c[0]));
+        List<Object> out = new ArrayList<>();
+        for (int k = 0; k < sorted.size() && k < max; k++) out.add(where((Box) sorted.get(k)[1], (Integer) sorted.get(k)[2], px, py, pz, now));
+        return out;
+    }
+
     /** For the map, when it changed: the buildings searched, where the car was left, and the recent way walked. */
     static synchronized void overlay() {
         Map<String, Object> out = new LinkedHashMap<>();

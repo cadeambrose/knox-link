@@ -353,6 +353,36 @@ public final class LuaBridge {
         }
     }
 
+    /** The nearest place each of these item types was seen (a list of full types): {type = where, ...}. */
+    @LuaMethod(name = "KnoxLink_memoryNearest", global = true)
+    public static KahluaTable memoryNearest(Object types) {
+        try {
+            List<String> list = new java.util.ArrayList<>();
+            if (types instanceof KahluaTable) {
+                KahluaTable t = (KahluaTable) types;
+                for (int i = 1; i <= t.len(); i++) {
+                    Object v = t.rawget(i);
+                    if (v != null) list.add(String.valueOf(v));
+                }
+            }
+            return (KahluaTable) toLua(Memory.nearest(list));
+        } catch (Throwable t) {
+            failedOnce("memory (nearest)", t);
+            return LuaManager.platform.newTable();
+        }
+    }
+
+    /** Things seen whose category has a word ("weapon"), nearest first: {{t, n, c, ic, cat, b, rm, town, x, y, z, d, dir, h}, ...}. */
+    @LuaMethod(name = "KnoxLink_memoryKinds", global = true)
+    public static KahluaTable memoryKinds(String word, double max) {
+        try {
+            return (KahluaTable) toLua(Memory.kinds(word, (int) max));
+        } catch (Throwable t) {
+            failedOnce("memory (kinds)", t);
+            return LuaManager.platform.newTable();
+        }
+    }
+
     /** Writes the memory to the save now (the game saves, or the character died). */
     @LuaMethod(name = "KnoxLink_memorySave", global = true)
     public static void memorySave() {
