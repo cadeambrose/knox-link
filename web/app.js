@@ -99,6 +99,7 @@ function subscribe() {
   }
   if (tab === 'journal') c.push('journal', 'diaries');
   if (tab === 'ask') c.push('ask');
+  if (tab === 'weapons') c.push('weapons');
   if (tab === 'skills') c.push('skills');
   if (tab === 'map') {
     c.push('marks', 'team', 'memory');
@@ -192,6 +193,7 @@ function onState(channel, d) {
     case 'diary': Diaries.onDiary(d); break;
     case 'recap': Recap.maybeShow(d); break;
     case 'ask': Ask.situation(d); break;
+    case 'weapons': Weapons.weapons(d); break;
     case 'menu': GameMenu.onMenu(d); break;   // the game's own menu for something a screen asked about
     case 'craft': Gear.craft(d); break;
     case 'journal': Journal.journal(d); break;
@@ -252,6 +254,7 @@ const TABS = [
   { k: 'map', label: 'Map', icon: 'map', art: 'Map' },
   { k: 'vitals', label: 'Vitals', icon: 'vitals', art: 'Heart' },
   { k: 'gear', label: 'Gear', icon: 'gear', art: 'Inventory' },
+  { k: 'weapons', label: 'Weapons', icon: 'weapon', more: true },
   { k: 'skills', label: 'Skills', icon: 'skills', more: true },
   { k: 'comms', label: 'Radio', icon: 'radio' },
   { k: 'base', label: 'Base', icon: 'home', more: true },
@@ -953,6 +956,7 @@ function applySettings() {
   if (S.journal) Journal.journal(S.journal);
   if (S.base) Base.base(S.base);
   if (S.loot) Gear.loot(S.loot);   // (distances follow the units)
+  Weapons.render();
   if (S.core) onCore(S.core);
   if (watch) watch.redraw();
   Radar.redraw();
@@ -1031,6 +1035,7 @@ function start() {
   Game.init();
   Journal.init();
   Ask.init();
+  Weapons.init();
   if (!('vibrate' in navigator)) $('input[data-set="vibrate"]').closest('.set-row').hidden = true;
   applySettings();
   updateFsButton();

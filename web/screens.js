@@ -2657,3 +2657,406 @@ const Ask = {
     requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
   },
 };
+
+// =================================================================== Weapons
+
+const clamp01 = (v) => Math.max(0, Math.min(1, Number(v) || 0));
+
+/**
+ * The armoury (KnoxLink_Weapons.lua, on "weapons"): every weapon the character carries, like a shooter's
+ * class screen, and a gunsmith for the guns: the gun big on a workbench with its places for parts around
+ * it, the parts that fit (carried, seen somewhere, or not found yet) and what each one would change.
+ * Melee weapons and throwables open on the same workbench; weapons seen elsewhere go to the map.
+ */
+const Weapons = {
+  // the game's places for gun parts, in plain words, and where each sits around the gun on the workbench
+  PLACES: { Scope: ['Optic', 'top'], Canon: ['Barrel', 'right'], RecoilPad: ['Recoil pad', 'left'], Sling: ['Sling', 'bottom'] },
+  // the stats where less is better
+  LESS: ['aim', 'recoil', 'reload', 'weight', 'noise'],
+
+  init() {
+    this.view = null;   // the panel over the list: {kind: "gun" | "melee" | "throw", id, k = the place picked, pick = the part type picked, '' = none}
+    this.sig = '';
+    this.listTop = 0;
+    const col = $('#weaponsCol');
+    col.addEventListener('click', (e) => this.tap(e));
+    // on a PC, the mouse wheel moves the row of parts sideways
+    col.addEventListener('wheel', (e) => {
+      const row = e.target.closest('.ws-parts');
+      if (!row || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || row.scrollWidth <= row.clientWidth) return;
+      row.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
+  },
+
+  /** The "weapons" message. */
+  weapons() { this.render(); },
+
+  /** A weapon of the message, by kind and id, or null. */
+  find(kind, id) {
+    const d = S.weapons || {};
+    return arr(kind === 'gun' ? d.guns : kind === 'melee' ? d.melee : d.throw).find((w) => w && String(w.id) === String(id)) || null;
+  },
+
+  slotsOf: (g) => arr(g && g.slots).filter((s) => s && s.k),
+  /** The type of the part on a place, or '' when it's empty. */
+  onType: (s) => (s && s.part && s.part.t) || '',
+  /** The parts to pick from on a place: everything that fits, and the one on the gun even when it isn't in that list. */
+  tiles(s) {
+    const fits = arr(s.fits).filter((f) => f && f.t);
+    return s.part && s.part.t && !fits.some((f) => f.t === s.part.t) ? [s.part, ...fits] : fits;
+  },
+
+  render() {
+    const d = S.weapons;
+    if (!d) return;
+    // the open panel's weapon is gone (dropped, thrown, broken): back to the list
+    if (this.view && !this.find(this.view.kind, this.view.id)) this.view = null;
+    if (this.view && this.view.kind === 'gun') this.settle();
+    const sig = JSON.stringify(d) + JSON.stringify(this.view) + settings.units;
+    if (sig === this.sig) return;
+    this.sig = sig;
+    const v = this.view, col = $('#weaponsCol');
+    const row = $('.ws-parts', col), left = row ? row.scrollLeft : 0;
+    col.innerHTML = !v ? this.list(d) : v.kind === 'gun' ? this.gunsmith(d) : v.kind === 'melee' ? this.meleeView(d) : this.throwView();
+    const row2 = $('.ws-parts', col);
+    if (row2) row2.scrollLeft = left;   // a new message doesn't lose the place in the row of parts
+  },
+
+  /** The gunsmith's place and part still exist (a part went on or off meanwhile); else what's on the first place. */
+  settle() {
+    const v = this.view, slots = this.slotsOf(this.find('gun', v.id));
+    let s = slots.find((x) => x.k === v.k);
+    if (!s) {
+      s = slots[0] || null;
+      v.k = s ? s.k : null;
+      v.pick = this.onType(s);
+    } else if (v.pick && !this.tiles(s).some((f) => f.t === v.pick)) {
+      v.pick = this.onType(s);
+    }
+  },
+
+  /** How far, to the step when it's close ("26 m S"). */
+  far(o) {
+    const d = Number(o.d) || 0;
+    return d < 3 ? 'Here' : (d < 100 ? Fmt.near(d) : Fmt.dist(d)) + (o.dir ? ' ' + o.dir : '');
+  },
+
+  /** The game's picture of a weapon or part, large, its pixels kept sharp. */
+  big: (ic, fallback = 'weapon') => itemIcon(ic, fallback, 'px big'),
+
+  condColor: (v) => (v < 0.25 ? 'var(--bad)' : v < 0.5 ? 'var(--warn)' : 'var(--good)'),
+
+  // ------------------------------------------------------------ the list: a class screen
+
+  list(d) {
+    const guns = arr(d.guns), melee = arr(d.melee), thr = arr(d.throw).filter((t) => t && t.id != null), seen = arr(d.seen);
+    const screw = !!d.screwdriver;
+    let html = `<div class="wp-head"><b>Weapons</b><button class="tag chip ${screw ? 'good' : 'warn'} wp-screw" data-w="screw">${screw ? icon('check') : ''}${screw ? 'Screwdriver' : 'No screwdriver'}</button></div>`;
+    html += '<h2 class="wp-sec">Guns</h2>' + (guns.length ? `<div class="wp-cards">${guns.map((g) => this.card(g, 'gun', d.max)).join('')}</div>` : '<p class="none">No guns on you.</p>');
+    html += '<h2 class="wp-sec">Melee</h2>' + (melee.length ? `<div class="wp-cards">${melee.map((w) => this.card(w, 'melee', d.max)).join('')}</div>` : '<p class="none">No melee weapons on you.</p>');
+    html += '<h2 class="wp-sec">Throwables</h2>';
+    if (!thr.length) html += '<p class="none">Nothing to throw.</p>';
+    else {
+      html += `<div class="card wp-throws">${[['lethal', 'Lethal'], ['tactical', 'Tactical']].map(([k, title]) => {
+        const list = thr.filter((t) => (t.kind === 'lethal') === (k === 'lethal'));
+        return list.length ? `<p class="wp-group">${title}</p>${list.map((t) => this.throwRow(t)).join('')}` : '';
+      }).join('')}</div>`;
+    }
+    if (seen.length) html += `<h2 class="wp-sec">Seen elsewhere</h2><div class="acts">${seen.map((o, i) => this.seenRow(o, i)).join('')}</div>`;
+    return html;
+  },
+
+  /** One gun or melee weapon: its picture on a dark panel, where it is, its state, and three bars. */
+  card(w, kind, max) {
+    const s = w.stats || {}, m = (max && max[kind]) || {};
+    const where = w.eq ? tag('In your hands', 'acc') : w.slot ? tag(w.slot) : '';
+    let rows = this.condRow('Condition', w.broken ? 0 : w.cond, w.broken ? 'Broken' : null);
+    if (w.sharp != null && w.sharpMax > 0) rows += this.condRow('Sharpness', w.sharp / w.sharpMax);
+    if (w.head != null && w.headMax > 0) rows += this.condRow('Head', w.head / w.headMax, `${w.head} / ${w.headMax}`);
+    let extra = '';
+    if (kind === 'gun') {
+      extra = `<span class="wp-ammo">${esc(this.ammoShort(w.ammo))}</span><span class="wp-slots">${this.slotsOf(w).map((sl) => {
+        const p = sl.part, name = (this.PLACES[sl.k] || [sl.k])[0];
+        return `<span class="wp-slot${p ? '' : ' empty'}" title="${esc(name + (p ? ': ' + p.n : ''))}">${p ? itemIcon(p.ic, 'tool', 'px') : icon('plus')}</span>`;
+      }).join('')}</span>`;
+    }
+    const minis = kind === 'gun'
+      ? [['Damage', s.dmg / (m.dmg || 1)], ['Range', s.range / (m.range || 1)], ['Accuracy', (s.hit || 0) / 100]]
+      : [['Damage', (s.dmg || 0) / 3], ['Range', (s.range || 0) / (m.range || 1.5)], ['Speed', ((s.speed || 0) - 0.6) / 0.8]];
+    return `<button class="card wp-card" data-w="${kind}" data-id="${esc(w.id)}"><span class="wp-pic">${this.big(w.ic)}</span>
+      <span class="wp-main"><span class="wp-name"><b>${esc(w.n)}</b>${where}</span>${rows}${extra}
+        <span class="wp-minis">${minis.map(([l, v]) => `<span class="wp-mini"><span>${l}</span>${bar(clamp01(v), 'var(--text-2)', 'thin')}</span>`).join('')}</span></span></button>`;
+  },
+
+  condRow(label, v, text) {
+    v = clamp01(v);
+    return `<span class="wp-cond"><span>${label}</span>${bar(v, this.condColor(v), 'thin')}<span>${text || pct(v) + '%'}</span></span>`;
+  },
+
+  /** "12 / 15 · 2 magazines · 48 rounds" */
+  ammoShort(a) {
+    if (!a) return '';
+    const out = [`${a.n || 0} / ${a.max || 0}`];
+    if (a.mag) out.push(a.mags === 1 ? '1 magazine' : `${a.mags || 0} magazines`);
+    out.push(a.spare === 1 ? '1 round' : `${a.spare || 0} rounds`);
+    return out.join(' · ');
+  },
+
+  /** "Fire · 4 m", "Blast · 7 m", ... the ones it has. */
+  effects(t) {
+    return [['Fire', t.fire], ['Blast', t.blast], ['Smoke', t.smoke], ['Noise', t.noise]].filter(([, v]) => Number(v) > 0).map(([n, v]) => `${n} · ${Fmt.near(Number(v))}`);
+  },
+
+  throwRow(t) {
+    return `<div class="wp-throw"><button class="wp-tmain" data-w="throw" data-id="${esc(t.id)}">${itemIcon(t.ic, 'weapon', 'px')}
+        <span class="ra-main"><span class="ra-name">${esc(t.n)}${t.cnt > 1 ? `<span class="cnt">×${t.cnt}</span>` : ''}</span>
+        <span class="it-tags">${this.effects(t).map((e) => tag(e)).join('')}</span></span></button>
+      <button class="mini-btn" data-w="equip" data-id="${esc(t.id)}">Equip</button></div>`;
+  },
+
+  /** A weapon seen elsewhere, like a "Where did I see...?" find; a tap shows it on the map. */
+  seenRow(o, i) {
+    const n = Number(o.c) || 1;
+    return `<button class="row-act seen-row" data-w="seen" data-i="${i}">${itemIcon(o.ic, 'weapon', 'sm')}
+      <span class="ra-main"><span class="ra-name">${esc(o.n)}${n > 1 ? `<span class="cnt">×${n}</span>` : ''}</span><span class="ra-sub">${esc(Seen.where(o, true))}</span></span>
+      <span class="seen-far"><b>${esc(this.far(o))}</b><span>${esc(Seen.ago(o.h))}</span></span></button>`;
+  },
+
+  // ------------------------------------------------------------ the gunsmith and the other weapons' panels
+
+  /** Back to the list, the weapon's name and condition. */
+  top(w) {
+    const c = clamp01(w.cond);
+    const cond = w.broken ? tag('Broken', 'bad') : w.cond != null ? tag(`Condition ${pct(c)}%`, c < 0.25 ? 'bad' : c < 0.5 ? 'warn' : '') : '';
+    return `<div class="ws-top"><button class="ws-back" data-w="back">${icon('chevron')}<span>Weapons</span></button>
+      <div class="ws-title"><b>${esc(w.n)}</b>${cond}</div></div>`;
+  },
+
+  /** The workbench: the weapon big in the middle; for a gun, each place for a part around it with a line to the gun. */
+  stage(w, slots) {
+    let nodes = '';
+    for (const s of slots || []) {
+      const place = this.PLACES[s.k];
+      if (!place) continue;
+      const p = s.part, on = !!this.view && s.k === this.view.k;
+      nodes += `<button class="ws-node ${place[1]}${on ? ' on' : ''}" data-w="slot" data-k="${esc(s.k)}">
+        <span class="ws-k">${place[0]}</span><span class="ws-tile">${p ? itemIcon(p.ic, 'tool', 'px') : icon('plus')}</span>
+        <span class="ws-pn${p ? '' : ' none'}">${p ? esc(p.n) : 'None'}</span></button>`;
+    }
+    return `<div class="ws-stage${slots ? '' : ' plain'}"><div class="ws-gun">${this.big(w.ic)}</div>${nodes}</div>`;
+  },
+
+  gunsmith(d) {
+    const v = this.view, g = this.find('gun', v.id);
+    const slots = this.slotsOf(g);
+    const s = slots.find((x) => x.k === v.k) || null;
+    const tiles = s ? this.tiles(s) : [];
+    const fit = s && v.pick ? tiles.find((f) => f.t === v.pick) || null : null;
+    // what's on the gun is picked: nothing to compare; anything else: the stats it would give
+    const same = !s || v.pick === this.onType(s);
+    const stats = g.stats || {};
+    const next = same ? null : this.preview(stats, s.part, fit);
+    return this.top(g) + `<div class="ws-grid"><div class="ws-left">${this.stage(g, slots)}
+        ${s ? this.partsRow(s, tiles) + `<div class="ws-act">${this.mainButton(s, fit, same)}</div>` : '<p class="none">No parts fit this gun.</p>'}</div>
+      <div class="ws-right"><div class="card ws-stats">${cardHead('Stats')}${this.gunBars(stats, next, (d.max && d.max.gun) || {})}</div>
+        <div class="card ws-ammo">${cardHead('Ammo')}${this.ammoLines(g.ammo)}</div>
+        ${this.buttons(g, 'All actions…')}</div></div>`;
+  },
+
+  /** "None" first, then each part that fits: picked, it's previewed. */
+  partsRow(s, tiles) {
+    const pick = this.view.pick, onT = this.onType(s);
+    const tile = (t, pic, name, badge, dim) => `<button class="ws-part${pick === t ? ' on' : ''}${dim ? ' dim' : ''}" data-w="pick" data-t="${esc(t)}">
+      <span class="ws-pic">${pic}</span><span class="ws-pname">${name}</span><span class="ws-badge">${badge}</span></button>`;
+    let html = tile('', icon('x'), 'None', '', false);
+    for (const f of tiles) {
+      const mine = f.t === onT, have = Number(f.have) > 0;
+      const badge = mine ? tag('On the gun', 'acc') : have ? tag('You have it', 'good') : f.at ? tag('Seen · ' + this.far(f.at)) : tag('Not found yet');
+      html += tile(f.t, itemIcon(f.ic, 'tool', 'px'), esc(f.n), badge, !mine && !have && !f.at);
+    }
+    return `<div class="ws-parts">${html}</div>`;
+  },
+
+  /** What the picked part can do here: attach, swap, take off, or where it was seen. */
+  mainButton(s, fit, same) {
+    if (same) return '<p class="ws-hint">Pick a part to see what it changes.</p>';
+    const screw = !!(S.weapons && S.weapons.screwdriver);
+    const needs = '<button class="btn" disabled>Needs a screwdriver</button>';
+    if (!fit) return screw ? `<button class="btn primary" data-w="off">${icon('x')}Take off</button>` : needs;
+    if (Number(fit.have) > 0) return screw ? `<button class="btn primary" data-w="attach">${icon('tool')}${s.part ? 'Swap' : 'Attach'}</button>` : needs;
+    if (fit.at) return `<button class="btn primary" data-w="where">${icon('pin')}Show where it is</button>`;
+    return '<button class="btn" disabled>Not found yet</button>';
+  },
+
+  /** The gun's stats with the picked part (null: none) in place of the one on it, the way the game adds parts up. */
+  preview(stats, on, fit) {
+    const s = { ...stats };
+    const off = (on && on.mods) || {}, add = (fit && fit.mods) || {};
+    for (const k of ['dmg', 'aim', 'reload', 'recoil', 'hit', 'range', 'weight']) s[k] = (Number(s[k]) || 0) - (Number(off[k]) || 0) + (Number(add[k]) || 0);
+    // the sight range follows the optic: the new one's, or the gun's own when the optic comes off
+    if (add.optic) s.sight = Number(add.sight) || 0;
+    else if (off.optic && stats.sight0 != null) s.sight = Number(stats.sight0);
+    return s;
+  },
+
+  gunBars(now, next, m) {
+    const n2 = (x) => num(Math.round((Number(x) || 0) * 100) / 100);
+    return [
+      ['dmg', 'Damage', (x) => x.dmg / (m.dmg || 1), '', n2],
+      ['range', 'Range', (x) => x.range / (m.range || 1), '', n2],
+      ['hit', 'Accuracy', (x) => x.hit / 100, '', (v) => `${Math.round(Number(v) || 0)}%`],
+      ['aim', 'Aim speed', (x) => (90 - x.aim) / 80, 'aim time ', n2],
+      ['recoil', 'Recoil control', (x) => (40 - x.recoil) / 35, 'recoil ', n2],
+      ['reload', 'Reload speed', (x) => (40 - x.reload) / 25, 'reload time ', n2],
+      ['sight', 'Sight range', (x) => x.sight / 25, '', n2],
+      ['noise', 'Noise', (x) => x.noise / (m.noise || 1), '', n2],
+      ['weight', 'Handling', (x) => 1 - x.weight / 6, 'weight ', n2],
+    ].map(([k, label, barOf, prefix, fmt]) => this.statRow(k, label, now, next, barOf, prefix, fmt)).join('');
+  },
+
+  /**
+   * One stat: its bar and the game's number. With a part picked that changes it: "30 → 20", the new
+   * number and the change on the bar green when it's better, red when it's worse.
+   */
+  statRow(k, label, now, next, barOf, prefix, fmt) {
+    const a = Number(now[k]) || 0, b = next ? Number(next[k]) || 0 : a;
+    const b0 = clamp01(barOf(now));
+    let fill = `<i class="st-now" style="width:${(b0 * 100).toFixed(1)}%"></i>`, value = prefix + fmt(a);
+    if (fmt(b) !== fmt(a)) {
+      const better = this.LESS.includes(k) ? b < a : b > a, b1 = clamp01(barOf(next));
+      const lo = Math.min(b0, b1), hi = Math.max(b0, b1);
+      fill = `<i class="st-now" style="width:${(lo * 100).toFixed(1)}%"></i>`
+        + (hi > lo ? `<i class="${better ? 'st-up' : 'st-down'}" style="left:${(lo * 100).toFixed(1)}%;width:${((hi - lo) * 100).toFixed(1)}%"></i>` : '');
+      value = `${prefix}${fmt(a)}<span class="st-to">→</span><b class="${better ? 'up' : 'down'}">${fmt(b)}</b>`;
+    }
+    return `<div class="st"><div class="st-top"><span>${label}</span><span class="st-v">${value}</span></div><div class="st-bar">${fill}</div></div>`;
+  },
+
+  /** A bar with no preview (a melee weapon's stats, its condition). */
+  plainRow(label, v, text, color) {
+    v = clamp01(v);
+    return `<div class="st"><div class="st-top"><span>${label}</span><span class="st-v">${text}</span></div>
+      <div class="st-bar"><i class="st-now" style="width:${(v * 100).toFixed(1)}%${color ? ';background:' + color : ''}"></i></div></div>`;
+  },
+
+  /** In the gun, the magazine, and what's carried for it. */
+  ammoLines(a) {
+    if (!a) return '<p class="none">No ammo for it.</p>';
+    const lines = [`In the gun: ${a.n || 0} / ${a.max || 0}${a.chambered ? ' (one in the chamber)' : ''}`];
+    if (a.mag) lines.push(`Magazine: ${a.mag} (${a.magIn ? 'in the gun' : 'not in the gun'})`);
+    const carried = [];
+    if (a.mag) carried.push(a.mags === 1 ? '1 spare magazine' : `${a.mags || 0} spare magazines`);
+    const n = a.spare || 0;
+    carried.push(`${n} ${n === 1 ? 'round' : 'rounds'}${a.round ? ' of ' + a.round : ''}`);
+    lines.push('Carried: ' + carried.join(' · '));
+    return lines.map((l) => `<p>${esc(l)}</p>`).join('');
+  },
+
+  buttons(w, menu) {
+    return `<div class="act-pair ws-btns"><button class="act" data-w="equip" data-id="${esc(w.id)}"${w.eq ? ' disabled' : ''}>${icon('hand')}<span>${w.eq ? 'In your hands' : 'Equip'}</span></button>
+      ${menu ? `<button class="act" data-w="menu">${icon('more')}<span>${menu}</span></button>` : ''}</div>`;
+  },
+
+  meleeView(d) {
+    const w = this.find('melee', this.view.id), s = w.stats || {}, m = (d.max && d.max.melee) || {};
+    const c = w.broken ? 0 : clamp01(w.cond);
+    let state = this.plainRow('Condition', c, w.broken ? 'Broken' : `${pct(c)}%`, this.condColor(c));
+    if (w.head != null && w.headMax > 0) state += this.plainRow('Head', w.head / w.headMax, `${w.head} / ${w.headMax}`, this.condColor(w.head / w.headMax));
+    if (w.sharp != null && w.sharpMax > 0) state += this.plainRow('Sharpness', w.sharp / w.sharpMax, `${pct(clamp01(w.sharp / w.sharpMax))}%`, this.condColor(w.sharp / w.sharpMax));
+    const n2 = (x) => num(Math.round((Number(x) || 0) * 100) / 100);
+    const endure = Number(s.endure) || 0, crowd = Number(s.crowd) || 1;
+    const bars = [
+      ['Damage', (s.dmg || 0) / 3, n2(s.dmg)],
+      ['Range', (s.range || 0) / (m.range || 1.5), n2(s.range)],
+      ['Speed', ((s.speed || 0) - 0.6) / 0.8, n2(s.speed)],
+      ['Critical', (s.crit || 0) / 100, `${Math.round(s.crit || 0)}%`],
+      ['Knockback', (s.knock || 0) / (m.knock || 1), n2(s.knock)],
+      ['Crowd', crowd / 4, `hits up to ${crowd}`],
+      ['Durability', Math.log(Math.max(1, endure)) / Math.log(60), `wears 1 hit in ${endure}`],
+    ].map(([l, v, t]) => this.plainRow(l, v, t)).join('');
+    return this.top(w) + `<div class="ws-grid"><div class="ws-left">${this.stage(w, null)}<div class="card ws-stats">${cardHead('Condition')}${state}</div></div>
+      <div class="ws-right"><div class="card ws-stats">${cardHead('Stats', s.two ? 'Two-handed' : '')}${bars}</div>
+        ${this.buttons(w, 'Repair or sharpen…')}</div></div>`;
+  },
+
+  throwView() {
+    const t = this.find('throw', this.view.id);
+    const facts = this.effects(t);
+    if (t.power > 0) facts.push(`Power · ${num(t.power)}`);
+    if (t.timer > 0) facts.push(`Timer · ${num(t.timer)}`);
+    const cnt = Number(t.cnt) || 1;
+    return this.top(t) + `<div class="ws-grid"><div class="ws-left">${this.stage(t, null)}</div>
+      <div class="ws-right"><div class="card">${cardHead(t.kind === 'lethal' ? 'Lethal' : 'Tactical', cnt === 1 ? 'You have 1' : `You have ${cnt}`)}
+        <div class="tagrow">${facts.map((f) => tag(f)).join('') || '<p class="none">Nothing more to it.</p>'}</div></div>
+        ${this.buttons(t)}</div></div>`;
+  },
+
+  tap(e) {
+    const b = e.target.closest('[data-w]');
+    if (!b || b.disabled) return;
+    const d = S.weapons || {}, w = b.dataset.w, v = this.view, pane = $('#view-weapons');
+    switch (w) {
+      case 'screw':
+        toast('You need a screwdriver to change attachments, like in the game.', !d.screwdriver);
+        return;
+      case 'gun': case 'melee': case 'throw': {
+        this.listTop = pane.scrollTop;
+        this.view = { kind: w, id: b.dataset.id };
+        if (w === 'gun') {
+          // the first place, with what's on it (or "None") picked
+          const s = this.slotsOf(this.find('gun', b.dataset.id))[0] || null;
+          this.view.k = s ? s.k : null;
+          this.view.pick = this.onType(s);
+        }
+        this.render();
+        pane.scrollTop = 0;
+        return;
+      }
+      case 'back':
+        this.view = null;
+        this.render();
+        pane.scrollTop = this.listTop;
+        return;
+      case 'slot': {
+        const s = this.slotsOf(this.find('gun', v.id)).find((x) => x.k === b.dataset.k);
+        if (!s) return;
+        v.k = s.k;
+        v.pick = this.onType(s);
+        this.render();
+        return;
+      }
+      case 'pick':
+        v.pick = b.dataset.t;
+        this.render();
+        return;
+      case 'equip':
+        command('swap', { id: Number(b.dataset.id) }, 'Equipping');
+        return;
+      case 'menu': {
+        const x = this.find(v.kind, v.id);
+        if (x) GameMenu.open(x.n, { kind: 'item', ids: [x.id] });
+        return;
+      }
+      case 'seen': {
+        const list = arr(d.seen), i = Number(b.dataset.i), o = list[i];
+        if (!o) return;
+        KnoxMap.setPins(list, i);
+        showOnMap(Number(o.x) + 0.5, Number(o.y) + 0.5, 3);
+        return;
+      }
+      default:
+        break;
+    }
+    // the gunsmith's button: the picked part on, the part off, or where it was seen
+    const g = v && this.find('gun', v.id), s = g && this.slotsOf(g).find((x) => x.k === v.k);
+    if (!s) return;
+    const fit = this.tiles(s).find((f) => f.t === v.pick) || null;
+    if (w === 'attach' && fit && fit.id != null) command('weaponAttach', { w: g.id, p: fit.id }, s.part ? 'Swapping' : 'Attaching');
+    else if (w === 'off') command('weaponDetach', { w: g.id, k: s.k }, 'Taking off');
+    else if (w === 'where' && fit && fit.at) {
+      KnoxMap.setPins([fit.at], 0);
+      showOnMap(Number(fit.at.x) + 0.5, Number(fit.at.y) + 0.5, 3);
+    }
+  },
+};

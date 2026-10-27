@@ -23,12 +23,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * nowatch (immersion, no watch), dark (too dark to read the map), nomap (no world map in this world),
  * fog (the map shows only explored ground), bed (a bed close by), woman (a female character),
  * house (the character walks round their house instead of round the block: zoom all the way in for its floor plan),
- * recap (the character dies a few seconds in: the recap card, once per run).
+ * recap (the character dies a few seconds in: the recap card, once per run), noscrewdriver (the gunsmith can't change parts).
  *
  * Always there: the floor plan of the house (on a real house of the map, north-west of the block), what the character
  * remembers (searched buildings, the car, the way walked; "Where did I see...?" answers), photos on the journal's
- * pages (made up here; /api/photo), two diaries left behind (one in the inventory, one on a body around you), and
- * the character's situation for Ask.
+ * pages (made up here; /api/photo), two diaries left behind (one in the inventory, one on a body around you),
+ * the character's situation for Ask, and the armoury for the Weapons tab: two guns with parts to fit (some carried,
+ * some only seen, some not found yet; attaching and taking them off works), three melee weapons, throwables and
+ * weapons seen elsewhere.
  */
 public final class DevMain {
     static boolean mp, imm, analog, noWatch, dark, noMap, fog, bed, female, house;
@@ -41,6 +43,9 @@ public final class DevMain {
     static final Map<String, byte[]> pictures = new ConcurrentHashMap<>();
     // the way walked so far (the map's "tr"): x, y, x, y, ...
     static final List<Object> walked = new ArrayList<>();
+    // the armoury: a screwdriver to change gun parts, the weapon in the hands, and when the Weapons tab needs telling
+    static boolean screwdriver = true, weaponsDirty = true;
+    static double equipped = 101.0;
 
     @SuppressWarnings("unchecked")
     public static void main(String[] args) throws Exception {
@@ -60,6 +65,7 @@ public final class DevMain {
         bed = opts.contains("bed");
         female = opts.contains("woman");
         house = opts.contains("house");
+        screwdriver = !opts.contains("noscrewdriver");
         boolean dies = opts.contains("recap");
         // no game to take photos or a save to read the way walked from: the server asks here instead
         Photo.dev = id -> pictures.computeIfAbsent(id, DevMain::picture);
@@ -286,6 +292,21 @@ public final class DevMain {
                         }
                         break;
                     }
+                    case "weaponAttach":
+                    case "weaponDetach": {
+                        // the gunsmith (KnoxLink_Weapons.lua): the part goes on (what was there back in the bag), or comes off
+                        String why = c.name.equals("weaponAttach") ? attach(c.args.get("w"), c.args.get("p")) : detach(c.args.get("w"), c.args.get("k"));
+                        ok = !why.startsWith("!");
+                        msg = ok ? why : why.substring(1);
+                        weaponsDirty = true;
+                        break;
+                    }
+                    case "swap":
+                        // the weapon goes into the hands (KnoxLink_Outfit.lua)
+                        if (c.args.get("id") instanceof Double) equipped = (Double) c.args.get("id");
+                        weaponsDirty = true;
+                        msg = null;
+                        break;
                     default:
                         break;
                 }
@@ -307,6 +328,11 @@ public final class DevMain {
                 KnoxServer.get().publish("ask", Json.write(m("text", situation(at, t), "name", female ? "Kate" : "Jack")));
             }
             if (dies && tick == 20) KnoxServer.get().publish("recap", Json.write(recap(recapId)));
+            // the armoury, every 2 s while the Weapons tab is open, and straight away when a part went on or off
+            if ((weaponsDirty || tick % 8 == 0) && KnoxServer.get().anyoneWants("weapons")) {
+                KnoxServer.get().publish("weapons", Json.write(weapons(at[0], at[1])));
+                weaponsDirty = false;
+            }
             if (KnoxServer.get().anyoneWants("body")) KnoxServer.get().publish("body", Json.write(body()));
             if (KnoxServer.get().anyoneWants("gear")) KnoxServer.get().publish("gear", Json.write(gear()));
             if (KnoxServer.get().anyoneWants("skills")) KnoxServer.get().publish("skills", Json.write(skills()));
@@ -1125,6 +1151,237 @@ public final class DevMain {
                 "Within reach: Floor: Plank, Ripped Sheet; Counter: Canned Beans, Pop, Screwdriver; Drawer: Spoon; Dead zombie: Wallet, Hunting Knife.",
                 "Skills: Fitness 5, Strength 5, Sprinting 1, Sneaking 2, Long Blunt 3, Maintenance 1, Carpentry 2, First Aid 1.",
                 "Zombies: 2 in sight, 1 coming for the character.");
+    }
+
+    // ------------------------------------------------------------------ the armoury (KnoxLink_Weapons.lua)
+
+    // the game's weapon parts (weaponpart.txt): type, name, icon (the game's own: its x2 and x4 scopes have each other's),
+    // place, what each changes {aim, sight, sightMin, reload, recoil, hit, range, weight, spread, dmg}, and whether it's
+    // an optic (the base:optics tag: the scopes and the red dot; the tritium sights have a sight range but aren't one)
+    static final Object[][] PARTS = {
+            {"Base.x2Scope", "x2 Scope", "Item_Scope4x", "Scope", new double[]{5, 12, 4, 0, 0, 0, 0, 0.3, 0, 0}, true},
+            {"Base.x4Scope", "x4 Scope", "Item_Scope2x", "Scope", new double[]{10, 16, 8, 0, 0, 0, 0, 0.4, 0, 0}, true},
+            {"Base.x8Scope", "x8 Scope", "Item_Scope8x", "Scope", new double[]{20, 22, 15, 0, 0, 0, 0, 0.8, 0, 0}, true},
+            {"Base.RedDot", "Red Dot Sight", "Item_RedDot", "Scope", new double[]{-10, 10, 2, 0, 0, 0, 0, 0.2, 0, 0}, true},
+            {"Base.TritiumSights", "Tritium Pistol Sights", "Item_ScopeIronSight", "Scope", new double[]{-3, 6, 2, 0, 0, 0, 0, 0, 0, 0}, false},
+            {"Base.Laser", "Laser Sight", "Item_HandgunLaser", "Canon", new double[]{-10, 0, 0, 0, 0, 5, 0, 0.6, 0, 0}, false},
+            {"Base.GunLight", "Gun Light", "Item_Flashlight2", "Canon", new double[]{5, 0, 0, 0, 0, 0, 0, 0.2, 0, 0}, false},
+            {"Base.RecoilPad", "Recoil Pad", "Item_RifleRecoilPad", "RecoilPad", new double[]{0, 0, 0, 0, -2, 0, 0, 0.1, 0, 0}, false},
+            {"Base.AmmoStraps", "Ammo Straps", "Item_AmmoStrap", "Sling", new double[]{0, 0, 0, -5, 0, 0, 0, 0.5, 0, 0}, false},
+    };
+
+    /** A gun the character carries: its own numbers (the item script's), the parts that fit each place, and what's on it. */
+    static final class Gun {
+        final double id, cond;
+        final String n, t, ic, slot;
+        final double[] base;   // dmg, range, hit, aim, recoil, reload, noise, sight, crit, weight
+        final Map<String, String[]> fits = new LinkedHashMap<>();   // place -> the part types that fit
+        final Map<String, String> on = new LinkedHashMap<>();       // place -> the part type on it
+        final Map<String, Double> onId = new LinkedHashMap<>();     // place -> that part's item id
+        Map<String, Object> ammo;
+
+        Gun(double id, String n, String t, String ic, String slot, double cond, double... base) {
+            this.id = id;
+            this.n = n;
+            this.t = t;
+            this.ic = ic;
+            this.slot = slot;
+            this.cond = cond;
+            this.base = base;
+        }
+    }
+
+    static final List<Gun> GUNS = new ArrayList<>();
+    // the parts in the bags (type -> item ids), and where the others were seen (type -> {container, room, x, y, z, hours ago})
+    static final Map<String, List<Double>> carried = new LinkedHashMap<>();
+    static final Map<String, Object[]> partSeen = new LinkedHashMap<>();
+
+    static {
+        // an M9 with nothing on it (the parts that fit, as asked for the screens), and the MSR788 with its x2 scope
+        Gun pistol = new Gun(701, "M9 Pistol", "Base.Pistol", "Item_HandGun3", "Holster", 0.85, 0.8, 15, 50, 25, 12, 30, 100, 6, 20, 1.5);
+        pistol.fits.put("Scope", new String[]{"Base.RedDot", "Base.TritiumSights"});
+        pistol.fits.put("Canon", new String[]{"Base.Laser", "Base.GunLight"});
+        pistol.fits.put("Sling", new String[]{"Base.AmmoStraps"});
+        pistol.ammo = m("n", 12, "max", 15, "chambered", true, "mag", "M9 Magazine", "magIn", true, "spare", 48, "mags", 2, "round", "9x19mm Round");
+        Gun rifle = new Gun(702, "MSR788 Rifle", "Base.HuntingRifle", "Item_RifleHunting", "Back", 0.62, 1.6, 40, 50, 60, 23, 25, 170, 10, 30, 4.0);
+        rifle.fits.put("Scope", new String[]{"Base.x2Scope", "Base.x4Scope", "Base.x8Scope", "Base.RedDot", "Base.TritiumSights"});
+        rifle.fits.put("Canon", new String[]{"Base.Laser"});
+        rifle.fits.put("RecoilPad", new String[]{"Base.RecoilPad"});
+        rifle.fits.put("Sling", new String[]{"Base.AmmoStraps"});
+        rifle.on.put("Scope", "Base.x2Scope");
+        rifle.onId.put("Scope", 820.0);
+        rifle.ammo = m("n", 3, "max", 4, "chambered", true, "spare", 18, "mags", 0, "round", "7.62x51mm Round");
+        GUNS.add(pistol);
+        GUNS.add(rifle);
+        carried.put("Base.RedDot", new ArrayList<>(List.of(811.0)));
+        carried.put("Base.x4Scope", new ArrayList<>(List.of(812.0)));
+        carried.put("Base.GunLight", new ArrayList<>(List.of(813.0)));
+        partSeen.put("Base.Laser", new Object[]{"Metal Shelves", "Storage", 10630, 9381, 0, 30.0});
+        partSeen.put("Base.AmmoStraps", new Object[]{"Crate", "Garage", 10655, 9416, 0, 26.0});
+        partSeen.put("Base.x8Scope", new Object[]{"Wardrobe", "Bedroom", 10694, 9399, 1, 8.0});
+        partSeen.put("Base.RecoilPad", new Object[]{"Shelf", "Shed", 10626, 9363, 0, 52.0});
+    }
+
+    static Object[] partDef(String type) {
+        for (Object[] p : PARTS) if (p[0].equals(type)) return p;
+        throw new IllegalArgumentException(type);
+    }
+
+    /** A part as the Weapons tab gets it: {t, n, ic, k, mods}. */
+    static Map<String, Object> part(String type) {
+        Object[] p = partDef(type);
+        double[] v = (double[]) p[4];
+        Map<String, Object> mods = m("aim", v[0], "sight", v[1], "sightMin", v[2], "reload", v[3], "recoil", v[4], "hit", v[5], "range", v[6],
+                "weight", v[7], "spread", v[8], "dmg", v[9]);
+        if ((Boolean) p[5]) mods.put("optic", true);
+        return m("t", p[0], "n", p[1], "ic", p[2], "k", p[3], "mods", mods);
+    }
+
+    static String compass(int dx, int dy) {
+        return new String[]{"E", "SE", "S", "SW", "W", "NW", "N", "NE"}[(int) Math.floorMod(Math.round(Math.toDegrees(Math.atan2(dy, dx)) / 45), 8)];
+    }
+
+    /** Where something was seen, as Memory.where sends it: {t, n, c, ic, cat, b, rm, town, x, y, z, d, dir, h}. */
+    static Map<String, Object> where(String t, String n, String ic, String cat, Object[] at, double px, double py) {
+        int x = (Integer) at[2], y = (Integer) at[3], z = (Integer) at[4];
+        int dx = x - (int) Math.floor(px), dy = y - (int) Math.floor(py);
+        Map<String, Object> r = m("t", t, "n", n, "c", 1, "ic", ic, "cat", cat, "b", at[0], "rm", at[1], "town", "Muldraugh", "x", x, "y", y, "z", z,
+                "d", Math.round(Math.hypot(x + 0.5 - px, y + 0.5 - py) + Math.abs(z) * 3));
+        if (dx * dx + dy * dy >= 9) r.put("dir", compass(dx, dy));
+        r.put("h", at[5]);
+        return r;
+    }
+
+    static Map<String, Object> meleeRow(double id, String n, String t, String ic, String slot, double cond, double dmg, double range,
+                                        double speed, double crit, double knock, int crowd, int endure, int condMax, double weight, boolean two) {
+        Map<String, Object> row = m("id", id, "n", n, "t", t, "ic", ic, "cond", cond);
+        if (id == equipped) row.put("eq", "p");
+        if (slot != null) row.put("slot", slot);
+        Map<String, Object> st = m("dmg", dmg, "range", range, "speed", speed, "crit", crit, "knock", knock, "crowd", crowd, "endure", endure,
+                "condMax", condMax, "weight", weight);
+        if (two) st.put("two", true);
+        row.put("stats", st);
+        return row;
+    }
+
+    /** In the hands first, then on the hotbar, then the strongest (like the Lua). */
+    @SuppressWarnings("unchecked")
+    static int rank(Object a, Object b) {
+        Map<String, Object> x = (Map<String, Object>) a, y = (Map<String, Object>) b;
+        if (x.containsKey("eq") != y.containsKey("eq")) return x.containsKey("eq") ? -1 : 1;
+        if (x.containsKey("slot") != y.containsKey("slot")) return x.containsKey("slot") ? -1 : 1;
+        return Double.compare(((Number) ((Map<String, Object>) y.get("stats")).get("dmg")).doubleValue(),
+                ((Number) ((Map<String, Object>) x.get("stats")).get("dmg")).doubleValue());
+    }
+
+    /** "weapons": the guns with their parts and stats, the melee weapons, the throwables, weapons seen elsewhere, and the bars' maxima. */
+    static Map<String, Object> weapons(double px, double py) {
+        List<Object> guns = new ArrayList<>();
+        for (Gun g : GUNS) {
+            Map<String, Object> row = m("id", g.id, "n", g.n, "t", g.t, "ic", g.ic, "cond", g.cond);
+            if (g.id == equipped) row.put("eq", "p");
+            else row.put("slot", g.slot);
+            // the gun's numbers with its parts on, as the game adds them up (HandWeapon.attachWeaponPart); the sight
+            // range is the optic's while there is one, else the gun's own (sight0)
+            double[] b = g.base;
+            double dmg = b[0], range = b[1], hit = b[2], aim = b[3], recoil = b[4], reload = b[5], sight = b[7], weight = b[9];
+            for (String type : g.on.values()) {
+                double[] v = (double[]) partDef(type)[4];
+                aim += v[0];
+                reload += v[3];
+                recoil += v[4];
+                hit += v[5];
+                range += v[6];
+                weight += v[7];
+                dmg += v[9];
+                if ((Boolean) partDef(type)[5]) sight = v[1];
+            }
+            row.put("stats", m("dmg", dmg, "range", range, "hit", hit, "aim", aim, "recoil", recoil, "reload", reload, "noise", b[6],
+                    "sight", sight, "sight0", b[7], "crit", b[8], "weight", Math.round(weight * 100) / 100.0, "pellets", 1));
+            row.put("ammo", g.ammo);
+            List<Object> slots = new ArrayList<>();
+            for (Map.Entry<String, String[]> e : g.fits.entrySet()) {
+                List<Object> fits = new ArrayList<>();
+                for (String type : e.getValue()) {
+                    Map<String, Object> f = part(type);
+                    List<Double> have = carried.getOrDefault(type, new ArrayList<>());
+                    f.put("have", have.size());
+                    if (!have.isEmpty()) f.put("id", have.get(0));
+                    else if (partSeen.containsKey(type)) f.put("at", where(type, (String) f.get("n"), (String) f.get("ic"), "WeaponPart", partSeen.get(type), px, py));
+                    fits.add(f);
+                }
+                Map<String, Object> slot = m("k", e.getKey(), "fits", fits);
+                String on = g.on.get(e.getKey());
+                if (on != null) {
+                    Map<String, Object> p = part(on);
+                    p.put("id", g.onId.get(e.getKey()));
+                    slot.put("part", p);
+                }
+                slots.add(slot);
+            }
+            row.put("slots", slots);
+            guns.add(row);
+        }
+        guns.sort(DevMain::rank);
+        List<Object> melee = l(
+                meleeRow(721, "Firefighter Axe", "Base.Axe", "Item_Axe", null, 0.77, 1.4, 1.2, 1.0, 20, 0.3, 2, 35, 13, 3.0, true),
+                meleeRow(722, "Hunting Knife", "Base.HuntingKnife", "Item_HuntingKnife", "Belt Right", 0.4, 0.9, 0.9, 1.0, 50, 0.01, 1, 15, 10, 1.0, false),
+                meleeRow(101, "Baseball Bat", "Base.BaseballBat", "Item_BaseballBat", "Belt Left", 0.72, 0.95, 1.25, 1.0, 40, 0.5, 2, 20, 15, 2.0, true));
+        ((Map<String, Object>) melee.get(0)).putAll(m("head", 9, "headMax", 13, "sharp", 0.62, "sharpMax", 1.0));
+        ((Map<String, Object>) melee.get(1)).putAll(m("sharp", 0.35, "sharpMax", 1.0));
+        melee.sort(DevMain::rank);
+        List<Object> thr = l(
+                m("id", 731, "n", "Molotov Cocktail", "t", "Base.Molotov", "ic", "Item_Molotov", "cnt", 2, "kind", "lethal",
+                        "fire", 4, "blast", 0, "smoke", 0, "noise", 0, "power", 0, "timer", 0),
+                m("id", 732, "n", "Pipe Bomb", "t", "Base.PipeBomb", "ic", "Item_PipeBomb", "cnt", 1, "kind", "lethal",
+                        "fire", 0, "blast", 7, "smoke", 0, "noise", 0, "power", 90, "timer", 0),
+                m("id", 733, "n", "Smoke Bomb", "t", "Base.SmokeBomb", "ic", "Item_Smokebomb", "cnt", 1, "kind", "tactical",
+                        "fire", 0, "blast", 0, "smoke", 5, "noise", 10, "power", 0, "timer", 50),
+                m("id", 734, "n", "Noise Maker", "t", "Base.NoiseTrap", "ic", "Item_NoiseMaker", "cnt", 1, "kind", "tactical",
+                        "fire", 0, "blast", 0, "smoke", 0, "noise", 17, "power", 0, "timer", 50));
+        List<Object> seen = l(
+                where("Base.KitchenKnife", "Kitchen Knife", "Item_KitchenKnife_Forged", "Weapon", new Object[]{"Counter", "Kitchen", 10657, 9387, 0, 1.4}, px, py),
+                where("Base.Shotgun", "JS-2000 Shotgun", "Item_Shotgun", "Weapon", new Object[]{"Metal Shelves", "Storage", 10630, 9381, 0, 30.0}, px, py),
+                where("Base.Crowbar", "Crowbar", "Item_Crowbar", "ToolWeapon", new Object[]{"Crate", "Garage", 10655, 9416, 0, 26.0}, px, py),
+                where("Base.Machete", "Machete", "Item_Machete", "Weapon", new Object[]{"Shelf", "Shed", 10626, 9363, 0, 52.0}, px, py));
+        seen.sort((a, b) -> Long.compare((Long) ((Map<String, Object>) a).get("d"), (Long) ((Map<String, Object>) b).get("d")));
+        // the most each stat gets among the game's weapons (allMaxima), rounded the way the bars look sensible
+        Map<String, Object> max = m("gun", m("dmg", 2.2, "range", 40, "noise", 200),
+                "melee", m("dmg", 3.0, "range", 1.5, "crowd", 4, "knock", 1.0, "cond", 20, "endure", 40));
+        return m("guns", guns, "melee", melee, "throw", thr, "seen", seen, "screwdriver", screwdriver, "max", max);
+    }
+
+    static Gun gunOf(Object id) {
+        for (Gun g : GUNS) if (id instanceof Double && g.id == (Double) id) return g;
+        return null;
+    }
+
+    /** weaponAttach: the part on its place (what was there goes back in the bag); its name, or "!" and why not. */
+    static String attach(Object w, Object p) {
+        Gun g = gunOf(w);
+        if (g == null) return "!That gun is no longer on you";
+        String type = null;
+        for (Map.Entry<String, List<Double>> e : carried.entrySet()) if (e.getValue().contains(p)) type = e.getKey();
+        if (type == null) return "!That part is no longer on you";
+        if (!screwdriver) return "!You need a screwdriver";
+        String k = (String) partDef(type)[3];
+        if (g.on.containsKey(k)) carried.computeIfAbsent(g.on.get(k), x -> new ArrayList<>()).add(g.onId.get(k));
+        carried.get(type).remove(p);
+        g.on.put(k, type);
+        g.onId.put(k, (Double) p);
+        return (String) partDef(type)[1];
+    }
+
+    /** weaponDetach: the part in place k back in the bag; its name, or "!" and why not. */
+    static String detach(Object w, Object k) {
+        Gun g = gunOf(w);
+        if (g == null) return "!That gun is no longer on you";
+        String place = String.valueOf(k), type = g.on.get(place);
+        if (type == null) return "!Nothing there";
+        if (!screwdriver) return "!You need a screwdriver";
+        carried.computeIfAbsent(type, x -> new ArrayList<>()).add(g.onId.remove(place));
+        g.on.remove(place);
+        return (String) partDef(type)[1];
     }
 
     static Map<String, Object> skills() {

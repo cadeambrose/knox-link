@@ -428,6 +428,143 @@ button.tag.chip { cursor: pointer; }
 }
 :root.art-skill .squares i.part::before { background-color: var(--accent-soft); clip-path: inset(0 calc(100% - var(--p)) 0 0); }
 
+/* ------------------------------------------------------------------ weapons: a class screen and a gunsmith */
+
+/* the game's pixel art, large and sharp */
+.ii.px > img { image-rendering: pixelated; }
+.ii.big { width: 100%; height: auto; aspect-ratio: 1; background: none; border-radius: 0; overflow: visible; }
+.ii.big > img { left: 0; top: 0; width: 100%; height: 100%; }
+.ii.big > .ico { width: 34%; height: 34%; color: #6f7782; }
+.wp-head { display: flex; align-items: center; gap: 10px; margin: 2px 2px 4px; }
+.wp-head > b { flex: 1; font-size: 1.27em; }
+.wp-screw { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; font-size: .84em; }
+.wp-screw .ico { width: 15px; height: 15px; stroke-width: 2.4; }
+.wp-sec { margin: 18px 4px 8px; }
+.wp-cards { display: flex; flex-direction: column; gap: 10px; }
+.wp-card { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 14px; width: 100%; padding: 10px 14px 12px 10px; text-align: left; }
+.wp-card:active { background: var(--surface-2); }
+.wp-pic { width: 124px; height: 110px; border-radius: 12px; display: grid; place-items: center; background: radial-gradient(ellipse at 50% 42%, #2e343d 0%, #15181d 72%); border: 1px solid #262b33; }
+.wp-pic .ii.big { width: 88px; }
+.wp-main { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.wp-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wp-name b { font-size: 1.07em; }
+.wp-cond { display: grid; grid-template-columns: 6.4em minmax(0, 1fr) 3.4em; align-items: center; gap: 8px; color: var(--text-3); font-size: .8em; font-weight: 700; }
+.wp-cond > span:last-child { text-align: right; color: var(--text-2); }
+.wp-ammo { color: var(--text-2); font-size: .86em; font-weight: 600; }
+.wp-slots { display: flex; gap: 6px; }
+.wp-slot { width: 32px; height: 32px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line); display: grid; place-items: center; color: var(--text-3); }
+.wp-slot.empty { opacity: .6; }
+.wp-slot > .ico { width: 15px; height: 15px; }
+.wp-slot .ii { width: 28px; height: 28px; background: none; }
+.wp-slot .ii > img { left: 0; top: 0; width: 100%; height: 100%; }
+.wp-minis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 2px; }
+.wp-mini { display: flex; flex-direction: column; gap: 5px; color: var(--text-3); font-size: .72em; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.wp-throws { padding: 6px 6px 8px; }
+.wp-group { margin: 8px 8px 4px; color: var(--text-3); font-size: .78em; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.wp-throw { display: flex; align-items: center; gap: 8px; padding-right: 6px; border-radius: 12px; }
+.wp-tmain { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 7px 8px; border-radius: 12px; text-align: left; }
+.wp-tmain:active { background: var(--surface-2); }
+.wp-tmain .ii { width: 40px; height: 40px; }
+
+/* the gunsmith: back, the weapon's name; the workbench with the places around the gun, the parts; the stats */
+.ws-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.ws-back { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 8px 13px 8px 6px; border-radius: 11px; background: var(--surface-2); color: var(--text-2); font-weight: 700; font-size: .93em; }
+.ws-back .ico { width: 18px; height: 18px; transform: rotate(180deg); }
+.ws-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ws-title b { font-size: 1.2em; }
+.ws-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(250px, 1fr); gap: 12px; align-items: start; }
+.ws-left, .ws-right { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ws-stage {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); grid-template-rows: auto auto auto;
+  grid-template-areas: ". top ." "left gun right" ". bottom ."; gap: 14px 10px; padding: 10px 8px;
+  border-radius: 18px; border: 1px solid #262b33; color: #e6e9ee;
+  /* a dark workbench: a light above it, a faint grid */
+  background:
+    linear-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px) center / 22px 22px,
+    linear-gradient(90deg, rgba(255, 255, 255, .035) 1px, transparent 1px) center / 22px 22px,
+    radial-gradient(ellipse at 50% 46%, #2f353f 0%, #181b21 58%, #0b0d10 100%);
+}
+.ws-stage.plain { grid-template-columns: 1fr; grid-template-areas: "gun"; padding: 26px 8px; }
+.ws-gun { grid-area: gun; display: grid; place-items: center; min-width: 0; }
+.ws-gun .ii.big { width: min(100%, 240px); filter: drop-shadow(0 10px 14px rgba(0, 0, 0, .55)); }
+.ws-stage.plain .ws-gun .ii.big { width: min(46%, 220px); }
+.ws-node { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; max-width: 104px; min-width: 0; padding: 0; color: inherit; }
+.ws-node.top { grid-area: top; justify-self: center; }
+.ws-node.bottom { grid-area: bottom; justify-self: center; }
+.ws-node.left { grid-area: left; align-self: center; justify-self: end; }
+.ws-node.right { grid-area: right; align-self: center; justify-self: start; }
+.ws-k { font-size: .68em; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #9aa2ad; white-space: nowrap; }
+.ws-tile { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: rgba(255, 255, 255, .07); border: 1.5px solid rgba(255, 255, 255, .17); color: #8a929d; transition: border-color .12s, box-shadow .12s; }
+.ws-tile > .ico { width: 22px; height: 22px; }
+.ws-tile .ii { width: 44px; height: 44px; background: none; }
+.ws-tile .ii > img { left: 0; top: 0; width: 100%; height: 100%; }
+.ws-node.on .ws-tile { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+.ws-node.on .ws-k { color: var(--accent); }
+.ws-pn { max-width: 100%; font-size: .74em; font-weight: 700; color: #d4d8de; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-pn.none { color: #6f7782; }
+/* a thin line from each place to the gun, with a dot where it meets it */
+.ws-node::before, .ws-node::after { content: ""; position: absolute; pointer-events: none; }
+.ws-node::before { border-color: rgba(255, 255, 255, .26); border-style: solid; border-width: 0; }
+.ws-node::after { width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, .45); }
+.ws-node.top::before { left: 50%; top: 100%; height: 22px; border-left-width: 1.5px; }
+.ws-node.top::after { left: calc(50% - 2.25px); top: calc(100% + 20px); }
+.ws-node.bottom::before { left: 50%; bottom: 100%; height: 22px; border-left-width: 1.5px; }
+.ws-node.bottom::after { left: calc(50% - 2.25px); bottom: calc(100% + 20px); }
+.ws-node.left::before { left: 100%; top: 44px; width: 18px; border-top-width: 1.5px; }
+.ws-node.left::after { left: calc(100% + 16px); top: 41.75px; }
+.ws-node.right::before { right: 100%; top: 44px; width: 18px; border-top-width: 1.5px; }
+.ws-node.right::after { right: calc(100% + 16px); top: 41.75px; }
+.ws-node.on::before { border-color: var(--accent); }
+.ws-node.on::after { background: var(--accent); }
+.ws-parts { display: flex; gap: 8px; overflow-x: auto; padding: 2px; scrollbar-width: none; }
+.ws-parts::-webkit-scrollbar { display: none; }
+.ws-part { flex: none; width: 112px; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 6px; border-radius: 14px; background: var(--surface); border: 1.5px solid var(--line); text-align: center; }
+.ws-part.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.ws-part.dim { opacity: .55; }
+.ws-pic { width: 44px; height: 44px; display: grid; place-items: center; color: var(--text-3); }
+.ws-pic > .ico { width: 22px; height: 22px; }
+.ws-pic .ii { width: 44px; height: 44px; background: none; }
+.ws-pic .ii > img { left: 0; top: 0; width: 100%; height: 100%; }
+.ws-pname { font-weight: 700; font-size: .84em; line-height: 1.2; min-height: 2.4em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ws-badge { min-height: 1.4em; }
+.ws-badge .tag { white-space: nowrap; font-size: .72em; }
+.ws-act { display: flex; justify-content: center; }
+.ws-act .btn { min-width: 220px; }
+.ws-act .btn .ico { width: 18px; height: 18px; }
+.ws-hint { color: var(--text-3); font-size: .9em; padding: 10px 0; text-align: center; }
+.ws-stats { display: flex; flex-direction: column; gap: 9px; }
+.ws-stats .card-head { margin-bottom: 2px; }
+.st-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 5px; font-size: .9em; }
+.st-top > span:first-child { color: var(--text-2); font-weight: 700; white-space: nowrap; }
+.st-v { font-weight: 700; white-space: nowrap; text-align: right; }
+.st-v b { font-weight: 800; }
+.st-v b.up { color: var(--good); }
+.st-v b.down { color: var(--bad); }
+.st-to { margin: 0 .5em; color: var(--text-3); }
+.st-bar { position: relative; height: 8px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.st-bar > i { position: absolute; top: 0; bottom: 0; left: 0; }
+.st-now { background: var(--text-2); }
+.st-up { background: var(--good); }
+.st-down { background: var(--bad); }
+.ws-ammo p { color: var(--text-2); font-size: .92em; line-height: 1.4; }
+.ws-ammo p + p { margin-top: 4px; }
+.ws-btns { margin: 0; flex-wrap: wrap; }
+.ws-btns .act { flex: 1 1 auto; width: auto; }
+.ws-btns .act > span { white-space: nowrap; }
+.ws-btns .act:disabled { opacity: .55; }
+@media (max-width: 800px) {
+  .ws-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .wp-card { grid-template-columns: 92px minmax(0, 1fr); gap: 10px; }
+  .wp-pic { width: 92px; height: 92px; }
+  .wp-pic .ii.big { width: 70px; }
+  .ws-tile { width: 46px; height: 46px; }
+  .ws-tile .ii { width: 38px; height: 38px; }
+  .ws-node.left::before, .ws-node.right::before { top: 41px; }
+  .ws-node.left::after, .ws-node.right::after { top: 38.75px; }
+}
+
 /* ------------------------------------------------------------------ car */
 
 .car { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
@@ -851,6 +988,12 @@ button.tag.chip { cursor: pointer; }
   .qt { width: 60px; height: 58px; }
   .car-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
   .skills { grid-template-columns: 1fr; }
+}
+
+/* shorter screens: the tabs pack a little closer so they all fit on the rail */
+@media (max-height: 720px) and (min-height: 501px) {
+  .rail { gap: 0; padding-top: 4px; padding-bottom: 4px; }
+  .rail button { padding: 4px 0 3px; gap: 2px; }
 }
 
 /* compact heights (a phone in landscape): icons only on the rail */
