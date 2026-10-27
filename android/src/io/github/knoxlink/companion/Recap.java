@@ -102,7 +102,8 @@ final class Recap {
 
         // the numbers
         LinearLayout stats = Ui.row(c);
-        stats.addView(stat(c, t, String.valueOf(Math.max(1, (int) (r.optDouble("hours") / 24) + 1)), "days"), Ui.weight(1));
+        int dayN = Math.max(1, (int) (r.optDouble("hours") / 24) + 1);
+        stats.addView(stat(c, t, String.valueOf(dayN), dayN == 1 ? "day" : "days"), Ui.weight(1));
         stats.addView(stat(c, t, String.valueOf(r.optInt("kills")), r.optInt("kills") == 1 ? "kill" : "kills"), Ui.weight(1));
         TextView walkedNum = Ui.text(c, t, "…", 22, INK, true);
         LinearLayout walkedBox = statBox(c, t, walkedNum, "walked");
@@ -312,8 +313,9 @@ final class Recap {
             y += 60;
         }
         // numbers
+        int dayN = Math.max(1, (int) (r.optDouble("hours") / 24) + 1);
         String[][] nums = {
-                {String.valueOf(Math.max(1, (int) (r.optDouble("hours") / 24) + 1)), "days"},
+                {String.valueOf(dayN), dayN == 1 ? "day" : "days"},
                 {String.valueOf(r.optInt("kills")), r.optInt("kills") == 1 ? "kill" : "kills"},
                 {trail == null || trail.length < 4 ? "–" : Fmt.dist(walked(trail)), "walked"}};
         for (int i = 0; i < 3; i++) {

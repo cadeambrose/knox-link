@@ -406,10 +406,10 @@ public final class LuaBridge {
         }
     }
 
-    /** Called before the game draws its UI (OnPreUIDraw): takes a booked photo. */
+    /** Called before the game draws its UI (OnPreUIDraw): takes a booked photo once it's time; true when it did. */
     @LuaMethod(name = "KnoxLink_photoFrame", global = true)
-    public static void photoFrame() {
-        Photo.frame();
+    public static boolean photoFrame() {
+        return Photo.frame();
     }
 
     @LuaMethod(name = "KnoxLink_photoDelete", global = true)

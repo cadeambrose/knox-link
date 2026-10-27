@@ -45,17 +45,20 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
     // made into a sticker like them ("sticker:" + texture or ui/ file; grey when off, in colour when chosen).
     private static final String[][] TABS = {
             {"map", "Map", "ui/Sidebar/128/Map_Off_128.png", "ui/Sidebar/128/Map_On_128.png", "map"},
-            {"vitals", "Vitals", "ui/Sidebar/128/Heart_Off_128.png", "ui/Sidebar/128/Heart_On_128.png", "vitals"},
+            {"vitals", "Character", "ui/Sidebar/128/Heart_Off_128.png", "ui/Sidebar/128/Heart_On_128.png", "vitals"},
             {"gear", "Gear", "ui/Sidebar/128/Inventory_Off_128.png", "ui/Sidebar/128/Inventory_On_128.png", "gear"},
             {"weapons", "Weapons", "ui/Sidebar/128/War_Off_128.png", "ui/Sidebar/128/War_On_128.png", "weapon"},
-            {"skills", "Skills", "sticker:Item_Book", "sticker:Item_Book", "skills"},
             {"comms", "Radio", "sticker:Item_RadioRed", "sticker:Item_RadioRed", "radio"},
             {"base", "Base", "ui/Sidebar/128/Build_Off_128.png", "ui/Sidebar/128/Build_On_128.png", "home"},
             {"journal", "Journal", "sticker:Item_Diary2", "sticker:Item_Diary2", "book"},
-            {"ask", "Ask", "sticker:ui/emotes/shrug.png", "sticker:ui/emotes/shrug.png", "ask"},
             {"car", "Car", "sticker:Item_CarKey", "sticker:Item_CarKey", "car"},
     };
     private static final String SETTINGS_ART = "sticker:ui/inventoryPanes/Button_Gear.png";
+    // Screens that share one tab on the rail, switched by the game's tabs across their top (like the game's
+    // character window, Health and Skills): {rail tab, its name, the other screen, its name}
+    private static final String[][] GROUPS = {{"vitals", "Health", "skills", "Skills"}, {"journal", "Journal", "ask", "Ask"}};
+    private final Map<String, String> lastInGroup = new HashMap<>();
+    private int railIcon;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
@@ -65,6 +68,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
 
     private FrameLayout root, content, sheetLayer;
     private LinearLayout sheetPanel, rail, toasts;
+    private android.widget.ScrollView railScroll;
     private View scrim;
     private TextView clockTime, clockDate, mapStatus, wpText, placeChip;
     private GameArt.Watch watch;
@@ -678,14 +682,14 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         weapons = new WeaponsScreen(this, this);
         car = new Screens.Car(this, this);
         settings = new Screens.Settings(this, this, this);
-        addScreen("vitals", vitals);
+        addScreen("vitals", grouped("vitals", vitals));
         addScreen("gear", gear);
         addScreen("weapons", weapons);
-        addScreen("skills", skills);
+        addScreen("skills", grouped("skills", skills));
         addScreen("comms", comms);
         addScreen("base", baseScreen);
-        addScreen("journal", journal);
-        addScreen("ask", ask);
+        addScreen("journal", grouped("journal", journal));
+        addScreen("ask", grouped("ask", ask));
         addScreen("car", car);
         addScreen("settings", settings);
         buildAlert();
@@ -732,6 +736,36 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         v.setVisibility(View.GONE);
         content.addView(v, Screens.match());
         screens.put(key, v);
+    }
+
+    /** A screen of a GROUPS pair, under the pair's tabs (this screen's chosen); other screens as they are. */
+    private View grouped(String key, View screen) {
+        for (String[] g : GROUPS) {
+            if (!g[0].equals(key) && !g[2].equals(key)) continue;
+            LinearLayout box = Ui.col(this);
+            LinearLayout seg = Ui.row(this);
+            theme.segBox(seg, theme.surface2);
+            for (int i = 0; i < g.length; i += 2) {
+                String k = g[i];
+                boolean on = k.equals(key);
+                TextView b = Ui.text(this, theme, g[i + 1], 14, on ? theme.text : theme.text2, true);
+                b.setGravity(Gravity.CENTER);
+                b.setPadding(0, theme.dp(9), 0, theme.dp(9));
+                b.setBackground(theme.seg(on));
+                if (!on) b.setOnClickListener(v -> setTab(k));
+                seg.addView(b, theme.pz && seg.getChildCount() > 0 ? Ui.margins(Ui.weight(1), -theme.dp(1), 0, 0, 0) : Ui.weight(1));
+            }
+            box.addView(seg, Ui.margins(Ui.lp(-1, -2), theme.dp(12), theme.dp(12), theme.dp(12), 0));
+            box.addView(screen, new LinearLayout.LayoutParams(-1, 0, 1));
+            return box;
+        }
+        return screen;
+    }
+
+    /** The rail tab a screen belongs to (Skills is under Character, Ask under Journal). */
+    private static String railKey(String key) {
+        for (String[] g : GROUPS) if (g[2].equals(key)) return g[0];
+        return key;
     }
 
     private static final String[] SPEED_ART = {"Pause", "Play", "FFwd1", "FFwd2"};
@@ -877,25 +911,66 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
 
     private View buildRail() {
         rail = Ui.col(this);
-        rail.setPadding(theme.dp(6), theme.dp(6), theme.dp(6), theme.dp(6));
-        for (String[] t : TABS) rail.addView(railButton(t[0], t[1], t[2], t[3], t[4]), Ui.margins(Ui.lp(-1, -2), 0, 0, 0, theme.dp(2)));
+        rail.setPadding(theme.dp(6), theme.dp(4), theme.dp(6), theme.dp(4));
+        for (String[] t : TABS) rail.addView(railButton(t[0], t[1], t[2], t[3], t[4]), Ui.margins(Ui.lp(-1, -2), 0, 0, 0, theme.dp(1)));
         rail.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1));
         rail.addView(railButton("settings", null, SETTINGS_ART, SETTINGS_ART, "settings"));
         tabButtons.get("car").setVisibility(View.GONE);
-        // scrolls only if a small screen can't fit every tab
+        // scrolls only if a small screen (or big text) can't fit every tab even with small pictures
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.setFillViewport(true);
         sv.setVerticalScrollBarEnabled(false);
         sv.setBackgroundColor(theme.surface);
         sv.addView(rail);
+        railScroll = sv;
+        railIcon = 0;
+        sv.addOnLayoutChangeListener((v, l, top, r, bottom, ol, oldTop, or, oldBottom) -> {
+            if (bottom - top != oldBottom - oldTop) v.post(this::fitRail);
+        });
         return sv;
+    }
+
+    /** Sizes the tabs' pictures to fill the rail's height (bigger with fewer tabs, smaller while the Car tab shows). */
+    private void fitRail() {
+        if (railScroll == null || railScroll.getHeight() == 0) return;
+        int n = 0, extra = 0;
+        for (String[] t : TABS) {
+            View b = tabButtons.get(t[0]);
+            if (b == null || b.getVisibility() != View.VISIBLE) continue;
+            n++;
+            // what a tab takes besides its picture: its label, padding and the gap below it
+            extra = Math.max(extra, b.getHeight() - ((LinearLayout) b).getChildAt(0).getHeight() + theme.dp(1));
+        }
+        View s = tabButtons.get("settings");
+        if (n == 0 || s == null || s.getHeight() == 0) return;
+        int free = railScroll.getHeight() - rail.getPaddingTop() - rail.getPaddingBottom() - s.getHeight() - theme.dp(4);
+        int icon = Math.max(theme.dp(24), Math.min(theme.dp(38), free / n - extra));
+        if (Math.abs(icon - railIcon) < theme.dp(1)) return;
+        railIcon = icon;
+        for (String[] t : TABS) {
+            View box = ((LinearLayout) tabButtons.get(t[0])).getChildAt(0);
+            ViewGroup.LayoutParams lp = box.getLayoutParams();
+            lp.width = icon;
+            lp.height = icon;
+            box.setLayoutParams(lp);
+        }
+    }
+
+    /** Scrolls the rail so the chosen tab shows, when the rail is taller than the screen. */
+    private void showRailButton(View b) {
+        if (railScroll == null || b == null) return;
+        railScroll.post(() -> {
+            int y = railScroll.getScrollY(), h = railScroll.getHeight();
+            if (b.getTop() < y) railScroll.smoothScrollTo(0, b.getTop());
+            else if (b.getBottom() > y + h) railScroll.smoothScrollTo(0, b.getBottom() - h);
+        });
     }
 
     private View railButton(String key, String label, String artOff, String artOn, String fallback) {
         LinearLayout b = Ui.col(this);
         b.setGravity(Gravity.CENTER_HORIZONTAL);
-        // compact enough for nine tabs on a handheld's second screen
-        b.setPadding(0, theme.dp(label == null ? 6 : 4), 0, theme.dp(label == null ? 6 : 3));
+        // compact enough for nine tabs and Settings on the Thor's second screen (1080 px at 2x)
+        b.setPadding(0, theme.dp(label == null ? 4 : 3), 0, theme.dp(label == null ? 4 : 2));
         FrameLayout iconBox = new FrameLayout(this);
         ImageView iv = new ImageView(this);
         iv.setImageDrawable(theme.icon(fallback, theme.text3));
@@ -906,15 +981,16 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         badge.setBackground(theme.circle(theme.bad));
         badge.setVisibility(View.GONE);
         iconBox.addView(badge, new FrameLayout.LayoutParams(theme.dp(9), theme.dp(9), Gravity.TOP | Gravity.END));
-        int box = artOff != null ? 30 : 26;
+        int box = label == null ? 24 : 27;
         b.addView(iconBox, new LinearLayout.LayoutParams(theme.dp(box), theme.dp(box)));
         TextView tv = null;
         if (label != null) {
             tv = Ui.text(this, theme, label, 10.5f, theme.text3, true);
-            b.addView(tv, Ui.margins(Ui.lp(-2, -2), 0, theme.dp(2), 0, 0));
+            b.addView(tv, Ui.margins(Ui.lp(-2, -2), 0, theme.dp(1), 0, 0));
         }
         b.setTag(new Object[]{iv, tv, artOff, artOn, fallback, badge});
-        b.setOnClickListener(v -> setTab(key));
+        // a tab with two screens opens the one used last
+        b.setOnClickListener(v -> setTab(lastInGroup.containsKey(key) ? lastInGroup.get(key) : key));
         tabButtons.put(key, b);
         if (artOff != null) {
             // the game's own pictures; the plain icon stays until they arrive
@@ -937,7 +1013,7 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
 
     private void styleRail() {
         for (Map.Entry<String, View> e : tabButtons.entrySet()) {
-            boolean on = e.getKey().equals(tab);
+            boolean on = e.getKey().equals(railKey(tab));
             Object[] tag = (Object[]) e.getValue().getTag();
             ImageView iv = (ImageView) tag[0];
             TextView tv = (TextView) tag[1];
@@ -1804,8 +1880,10 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
         if (!screens.containsKey(key)) key = "map";
         if (!"car".equals(key)) autoCarFrom = null;
         tab = key;
+        lastInGroup.put(railKey(key), key);
         for (Map.Entry<String, View> e : screens.entrySet()) e.getValue().setVisibility(e.getKey().equals(key) ? View.VISIBLE : View.GONE);
         styleRail();
+        showRailButton(tabButtons.get(railKey(key)));
         subscribe();
         if ("ask".equals(key)) ask.shown();
         if ("map".equals(key) && fogWanted) main.post(fogPoll);
@@ -2161,11 +2239,17 @@ public class MainActivity extends Activity implements Host, Link.Listener, Scree
             if (mo != null && "BLEEDING".equals(mo.optString("id"))) bleeding = true;
         }
         View vb = tabButtons.get("vitals");
-        if (vb != null) ((TextView) ((Object[]) vb.getTag())[1]).setTextColor(bleeding ? theme.bad : ("vitals".equals(tab) ? theme.accent : theme.text3));
+        boolean vitalsOn = "vitals".equals(railKey(tab));
+        if (vb != null) ((TextView) ((Object[]) vb.getTag())[1]).setTextColor(bleeding ? theme.bad
+                : theme.pz ? (vitalsOn ? 0xFFFFFFFF : theme.text2) : (vitalsOn ? theme.accent : theme.text3));
 
         JSONObject veh = c.optJSONObject("veh");
         View carBtn = tabButtons.get("car");
-        carBtn.setVisibility(veh != null ? View.VISIBLE : View.GONE);
+        int carShown = veh != null ? View.VISIBLE : View.GONE;
+        if (carBtn.getVisibility() != carShown) {
+            carBtn.setVisibility(carShown);
+            fitRail();
+        }
         // the dashboard opens once when you start driving; leave it and it stays closed until the next drive
         boolean driving = veh != null && veh.optBoolean("drv");
         if (driving && !carOpenedThisDrive && prefs.getBoolean("autoCar", true) && !"car".equals(tab)) {

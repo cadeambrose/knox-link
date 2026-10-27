@@ -1,9 +1,9 @@
 --[[
     Knox Link — the scrapbook: photos of the game for the journal.
 
-    A screen (or the "Take a photo" shortcut) asks for a photo; the server add-on takes the next
-    frame as the game shows it, before the game's own windows and bars are drawn (Photo.java),
-    and keeps it in the save. It goes on today's journal page (ph = { {id, c = caption, h, mi}, ... }),
+    A screen (or the "Take a photo" shortcut) asks for a photo; the game's own windows and bars are
+    hidden for a moment, like a shutter (the game's "toggle UI"), the server add-on takes the
+    screen as the game shows it (Photo.java) and keeps it in the save. It goes on today's journal page (ph = { {id, c = caption, h, mi}, ... }),
     with a line the diary writers can use.
 
     In immersion the character needs a camera: the game's own cameras, found as loot. A
@@ -51,6 +51,25 @@ end
 
 local taken = 0
 
+-- The shutter: the game's windows and bars hidden while a photo is taken, with the game's own "toggle UI".
+-- The game draws its UI into a buffer of its own at its own pace, so the photo waits a few frames for it.
+local shutter   -- { t = ms, ui = the UI was shown, paused = the "Game paused" line was shown }
+
+local function shutterOpen()
+    if shutter then return end
+    shutter = { t = getTimestampMs(), ui = ISUIHandler and ISUIHandler.allUIVisible ~= false, paused = UIManager.isShowPausedMessage() }
+    if shutter.ui then ISUIHandler.setVisibleAllUI(false) end
+    UIManager.setShowPausedMessage(false)
+end
+
+local function shutterClose()
+    if not shutter then return end
+    local s = shutter
+    shutter = nil
+    if s.ui then ISUIHandler.setVisibleAllUI(true) end
+    UIManager.setShowPausedMessage(s.paused)
+end
+
 KL.addHandler("photo", function(player, a)
     if not KnoxLink_photo then return false, "Needs the Knox Link Server add-on" end
     if player:isDead() then return false, "Not now" end
@@ -66,6 +85,7 @@ KL.addHandler("photo", function(player, a)
     id = id:gsub("[^%w_%-]", "")
     local why = KnoxLink_photo(id)
     if why then return false, why end
+    shutterOpen()
     if left then cam:getModData().KnoxLinkShots = ROLL - left + 1 end
     KL.journalPhoto(player, id, clean(a.c))
     -- (the screen says "Photo taken"; this is what it adds)
@@ -88,7 +108,10 @@ KL.addHandler("photoDelete", function(player, a)
     return true
 end)
 
--- the world is on the screen and the game's UI isn't yet: when a photo is booked, it's this frame
+-- before the game's UI pass: once the UI has been gone long enough, the photo is taken and the UI comes back
+-- (whatever happens, after 3 s at most)
 Events.OnPreUIDraw.Add(function()
-    if KnoxLink_photoFrame then KnoxLink_photoFrame() end
+    if not shutter then return end
+    local done = not KnoxLink_photoFrame or KnoxLink_photoFrame()
+    if done or getTimestampMs() - shutter.t > 3000 then shutterClose() end
 end)

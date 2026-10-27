@@ -19,13 +19,18 @@ Your map, your body, your bag, the radio, your base and your journal, live on a 
 
 [h2]What's on the second screen[/h2]
 [list]
-[*][b]Map[/b]: the game's world map in its paper style, following you. Waypoints, symbols and notes on the same map the game saves, fog of war, your base, teammates as the server allows.
+[*][b]Map[/b]: the game's world map in its paper style, following you. Waypoints, symbols and notes on the same map the game saves, fog of war, your base, teammates as the server allows. Zoom all the way in for a [b]floor plan[/b] of what your character has seen (walls, doors, windows, furniture, cars, the zombies they noticed), made for first person.
+[*][b]Where did I see...?[/b] Knox Link remembers every container your character looked in. Search "hammer" or tap Medicine: nearest first, in which container, room and town, and how long ago.
 [*][b]Vitals[/b]: every wound in the game's own words, and every treatment its health panel offers there (disinfect, bandage, stitch, remove glass or a bullet, splint...), only with what you actually have. Moodles, quick actions, and your character live in 3D.
 [*][b]Gear[/b]: in your hands, wearing, carrying, one section per bag. [b]Move items[/b] in batches to any bag, your key ring, a container around you or the floor. The game's own right-click menu for any item, every body within a few steps with its loot, and the things around you (doors, windows, curtains, light switches) with their own menus.
+[*][b]Weapons[/b]: your loadout, like a shooter's. Open a gun for the [b]gunsmith[/b]: its slots around it, and every stat change shown before you attach a part (better in green, worse in red), done the game's own way. Melee weapons and throwables too.
 [*][b]Skills, Radio[/b] (what you heard, the forecast, multiplayer chat), [b]Base[/b] (generators, rain collectors, crops), [b]Car[/b] (the game's dashboard with live needles).
-[*][b]Journal[/b]: a diary written in your character's voice from their day. Free and offline; optionally by an AI service you pick, with your own key.
+[*][b]Journal[/b]: a diary written in your character's voice from their day. Free and offline; optionally by an AI service you pick, with your own key. Photos for a scrapbook (with immersion on you need one of the game's cameras).
+[*][b]When you die[/b]: the journal becomes a diary on your body that your next survivor can find and read, and the second screen shows the run's recap.
+[*][b]Ask[/b]: questions about the game, answered by the AI you set up, with your situation in mind.
 [*][b]Danger radar[/b] of the zombies your character has seen or heard, and [b]alerts[/b] with a one-tap fix.
 [/list]
+It looks like the game: its own panels, buttons, tabs, colours and fonts, and its own art on every tab.
 
 [h2]How to use it[/h2]
 [olist]

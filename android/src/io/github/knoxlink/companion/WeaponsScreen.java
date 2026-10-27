@@ -675,7 +675,9 @@ final class WeaponsScreen extends FrameLayout {
     final class Stage extends View {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG), art = new Paint(), text = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
-        private Bitmap gun;
+        private Bitmap gun, anchorsFrom;
+        // on the gun's picture, in its pixels: stock end, muzzle end, top and underside at the middle
+        private float[] anchors;
         private final java.util.List<String[]> slots = new java.util.ArrayList<>();   // key, name, icon, part name
         private final java.util.Map<Integer, Bitmap> icons = new java.util.HashMap<>();
         private final float[][] nodes = new float[4][];
@@ -707,6 +709,53 @@ final class WeaponsScreen extends FrameLayout {
         protected void onMeasure(int w, int h) {
             int width = MeasureSpec.getSize(w);
             setMeasuredDimension(width, Math.min(t.dp(slots.isEmpty() ? 200 : 280), (int) (width * (slots.isEmpty() ? 0.4f : 0.55f))));
+        }
+
+        /**
+         * Where the slots' lines meet the gun, found from its picture (the game draws long guns corner to corner,
+         * pistols about level): the two ends of its long axis (the stock on the left, the muzzle on the right) and
+         * the top and underside of the gun at its middle, then the long axis's angle (degrees). Null for an empty
+         * picture.
+         */
+        private float[] anchors(Bitmap src) {
+            int w = src.getWidth(), h = src.getHeight();
+            int[] px = new int[w * h];
+            src.getPixels(px, 0, w, 0, 0, w, h);
+            double n = 0, mx = 0, my = 0;
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) if ((px[y * w + x] >>> 24) > 64) { n++; mx += x; my += y; }
+            if (n < 4) return null;
+            mx /= n;
+            my /= n;
+            double sxx = 0, syy = 0, sxy = 0;
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+                if ((px[y * w + x] >>> 24) <= 64) continue;
+                double dx = x - mx, dy = y - my;
+                sxx += dx * dx;
+                syy += dy * dy;
+                sxy += dx * dy;
+            }
+            double a = 0.5 * Math.atan2(2 * sxy, sxx - syy), ux = Math.cos(a), uy = Math.sin(a);
+            if (ux < 0) { ux = -ux; uy = -uy; }
+            double lo = 1e9, hi = -1e9;
+            float[] out = new float[9];
+            out[8] = (float) Math.toDegrees(a);
+            float top = 1e9f, bottom = -1e9f, topX = (float) mx, bottomX = (float) mx;
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+                if ((px[y * w + x] >>> 24) <= 64) continue;
+                double along = (x - mx) * ux + (y - my) * uy;
+                if (along < lo) { lo = along; out[0] = x + 0.5f; out[1] = y + 0.5f; }
+                if (along > hi) { hi = along; out[2] = x + 0.5f; out[3] = y + 0.5f; }
+                if (Math.abs(along) < 1.5) {
+                    if (y < top) { top = y; topX = x + 0.5f; }
+                    if (y + 1 > bottom) { bottom = y + 1; bottomX = x + 0.5f; }
+                }
+            }
+            if (top > bottom) { top = (float) my; bottom = (float) my; }
+            out[4] = topX;
+            out[5] = top;
+            out[6] = bottomX;
+            out[7] = bottom;
+            return out;
         }
 
         /** Where a slot's node goes: optic above, barrel at the muzzle (right), recoil pad at the stock (left), sling below. */
@@ -742,9 +791,17 @@ final class WeaponsScreen extends FrameLayout {
             float step = t.dpf(22);
             for (float x = step; x < w; x += step) c.drawLine(x, t.dpf(6), x, h - t.dpf(6), p);
             for (float y = step; y < h; y += step) c.drawLine(t.dpf(6), y, w - t.dpf(6), y, p);
-            // the weapon
-            float gw = w * (slots.isEmpty() ? 0.55f : 0.46f), gh = h * (slots.isEmpty() ? 0.8f : 0.42f);
+            // the weapon, as big as the stage allows: a long gun lies corner to corner in the game's picture, so
+            // the slots above and below sit beside it and it can take the stage's height; a level one (a pistol)
+            // keeps between them
+            if (gun != null && anchorsFrom != gun) {
+                anchors = anchors(gun);
+                anchorsFrom = gun;
+            }
+            boolean diagonal = anchors != null && Math.abs(anchors[8]) > 25;
+            float gw = w * (slots.isEmpty() ? 0.55f : diagonal ? 0.5f : 0.56f), gh = h * (slots.isEmpty() ? 0.8f : diagonal ? 0.78f : 0.42f);
             RectF g = new RectF(w / 2 - gw / 2, h / 2 - gh / 2, w / 2 + gw / 2, h / 2 + gh / 2);
+            float[] ends = null;   // stock, muzzle, top, underside, on the stage
             if (gun != null) {
                 float s = Math.min(g.width() / gun.getWidth(), g.height() / gun.getHeight());
                 float bw = gun.getWidth() * s, bh = gun.getHeight() * s;
@@ -755,6 +812,13 @@ final class WeaponsScreen extends FrameLayout {
                 p.setShader(null);
                 c.drawBitmap(gun, null, dst, art);
                 g = dst;
+                if (anchors != null) {
+                    ends = new float[8];
+                    for (int i = 0; i < 8; i += 2) {
+                        ends[i] = dst.left + anchors[i] * s;
+                        ends[i + 1] = dst.top + anchors[i + 1] * s;
+                    }
+                }
             }
             // the slots
             float tile = t.dpf(54);
@@ -763,9 +827,10 @@ final class WeaponsScreen extends FrameLayout {
                 float[] at = place(s[0], w, h);
                 nodes[i] = at;
                 boolean sel = i == selected;
-                // the line to the gun
-                float tx = "Scope".equals(s[0]) ? w / 2 : "Canon".equals(s[0]) ? g.right : "RecoilPad".equals(s[0]) ? g.left : w / 2;
-                float ty = "Scope".equals(s[0]) ? g.top : "Sling".equals(s[0]) ? g.bottom : h / 2;
+                // the line to the gun: the stock, the muzzle, its top or its underside
+                int e = "RecoilPad".equals(s[0]) ? 0 : "Canon".equals(s[0]) ? 2 : "Scope".equals(s[0]) ? 4 : 6;
+                float tx = ends != null ? ends[e] : "Scope".equals(s[0]) ? w / 2 : "Canon".equals(s[0]) ? g.right : "RecoilPad".equals(s[0]) ? g.left : w / 2;
+                float ty = ends != null ? ends[e + 1] : "Scope".equals(s[0]) ? g.top : "Sling".equals(s[0]) ? g.bottom : h / 2;
                 p.setStyle(Paint.Style.STROKE);
                 p.setStrokeWidth(t.dpf(1.5f));
                 p.setColor(sel ? t.accent : 0x66FFFFFF);

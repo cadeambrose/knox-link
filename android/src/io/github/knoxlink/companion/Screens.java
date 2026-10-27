@@ -175,7 +175,6 @@ final class Screens {
             flipBtn.setBackground(Ui.pressable(t, t.surface2, 10));
             flipBtn.setOnClickListener(v -> flip());
             this.flipBtn = flipBtn;
-            ((LinearLayout) bodyTitle.getParent()).addView(flipBtn, Ui.margins(Ui.lp(t.dp(34), t.dp(30)), t.dp(8), 0, 0, 0));
             body = new BodyView(c);
             body.setup(t, host.art(), this::tapBody);
             // the live 3D character sits over the silhouette in look mode (the silhouette is the fallback)
@@ -186,6 +185,12 @@ final class Screens {
             avatarView.setVisibility(GONE);
             avatarView.setOnTouchListener(this::touchAvatar);
             figure.addView(avatarView, new FrameLayout.LayoutParams(-1, -1));
+            if (t.pz) {
+                // the game's look: the title is a window's thin title bar, so the button sits in the figure's corner
+                figure.addView(flipBtn, new FrameLayout.LayoutParams(t.dp(34), t.dp(30), Gravity.TOP | Gravity.END));
+            } else {
+                ((LinearLayout) bodyTitle.getParent()).addView(flipBtn, Ui.margins(Ui.lp(t.dp(34), t.dp(30)), t.dp(8), 0, 0, 0));
+            }
             bodyCard.addView(figure, new LayoutParams(-1, 0, 1));
             Widgets.Flow legend = new Widgets.Flow(c, t.dp(10), t.dp(4));
             legend.addView(legendItem(c, t.surface3, "Healthy"));

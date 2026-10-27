@@ -793,6 +793,8 @@ button.tag.chip { cursor: pointer; }
 
 /* ------------------------------------------------------------------ ask */
 
+.group-tabs { max-width: 860px; margin: 0 auto 12px; }
+.view-ask .group-tabs { flex: none; width: 100%; }
 .view-ask { overflow: hidden; }
 .view-ask.active { display: flex; flex-direction: column; }
 .view-ask .ask { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; }

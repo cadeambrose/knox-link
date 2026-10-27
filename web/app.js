@@ -255,17 +255,39 @@ $('#ovSettings').addEventListener('click', () => { hideOverlay(); setTab('settin
 // sticker like them (stick: a white outline, grey when not chosen; KnoxArt.sticker).
 const TABS = [
   { k: 'map', label: 'Map', icon: 'map', side: 'Map' },
-  { k: 'vitals', label: 'Vitals', icon: 'vitals', side: 'Heart' },
+  { k: 'vitals', label: 'Character', icon: 'vitals', side: 'Heart' },
   { k: 'gear', label: 'Gear', icon: 'gear', side: 'Inventory' },
   { k: 'weapons', label: 'Weapons', icon: 'weapon', side: 'War', more: true },
-  { k: 'skills', label: 'Skills', icon: 'skills', stick: 'Item_Book', more: true },
   { k: 'comms', label: 'Radio', icon: 'radio', stick: 'Item_RadioRed' },
   { k: 'base', label: 'Base', icon: 'home', side: 'Build', more: true },
   { k: 'journal', label: 'Journal', icon: 'book', stick: 'Item_Diary2', more: true },
-  { k: 'ask', label: 'Ask', icon: 'ask', stick: 'ui/emotes/shrug.png', more: true },
   { k: 'car', label: 'Car', icon: 'car', stick: 'Item_CarKey' },
 ];
 const SETTINGS_TAB = { k: 'settings', label: 'Settings', icon: 'settings', stick: 'ui/inventoryPanes/Button_Gear.png' };
+// Views that share one tab, switched by the game's tabs across their top (like the game's character window,
+// Health and Skills): [rail tab, its name, the other view, its name]
+const GROUPS = [['vitals', 'Health', 'skills', 'Skills'], ['journal', 'Journal', 'ask', 'Ask']];
+const lastInGroup = {};
+const railKey = (k) => (GROUPS.find((g) => g[2] === k) || [k])[0];
+
+/** The pair's tabs at the top of both views of each group. */
+function groupTabs() {
+  for (const g of GROUPS) {
+    for (const k of [g[0], g[2]]) {
+      const v = $('#view-' + k);
+      if (!v || $('.group-tabs', v)) continue;
+      const bar = document.createElement('div');
+      bar.className = 'seg wide group-tabs';
+      bar.innerHTML = `<button data-go="${g[0]}"${k === g[0] ? ' class="on"' : ''}>${g[1]}</button>`
+        + `<button data-go="${g[2]}"${k === g[2] ? ' class="on"' : ''}>${g[3]}</button>`;
+      bar.addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-go]');
+        if (b && b.dataset.go !== tab) setTab(b.dataset.go);
+      });
+      v.prepend(bar);
+    }
+  }
+}
 
 /** A tab's icon: the plain icon, then the game's art over it once it has arrived (off and on). */
 function tabIcon(t, badge) {
@@ -293,12 +315,14 @@ function buildRail() {
     <button id="moreBtn" class="rb-more" aria-label="More"><span class="rb-ico">${icon('more')}<i class="badge" hidden></i></span><span class="rb-label">More</span></button>`;
   $('#rail').innerHTML = html;
   stickTabs($('#rail'));
+  groupTabs();
   $('#rail').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.id === 'moreBtn') moreSheet();
     else if (b.id === 'fsRail') toggleFullscreen();
-    else if (b.dataset.tab) setTab(b.dataset.tab);
+    // a tab with two views opens the one used last
+    else if (b.dataset.tab) setTab(lastInGroup[b.dataset.tab] || b.dataset.tab);
   });
 }
 
@@ -309,7 +333,7 @@ function moreSheet() {
   openSheet(sheetHead('More') + `<div class="more-grid">${items.map((t) =>
     `<button class="more-item${t.k === tab ? ' on' : ''}" data-act="tab" data-tab="${t.k}">${tabIcon(t)}<span>${t.label}</span></button>`).join('')}
     ${fs ? `<button class="more-item" data-act="fs">${icon('fullscreen')}<span>Full screen</span></button>` : ''}</div>`, {
-    tab: (b) => { closeSheet(); setTab(b.dataset.tab); },
+    tab: (b) => { closeSheet(); setTab(lastInGroup[b.dataset.tab] || b.dataset.tab); },
     fs: () => { closeSheet(); toggleFullscreen(); },
   });
   stickTabs($('#sheet'));
@@ -319,9 +343,11 @@ function setTab(key) {
   if (!$('#view-' + key)) key = 'map';
   if (key !== 'car') autoCarFrom = null;
   tab = key;
+  const rk = railKey(key);
+  lastInGroup[rk] = key;
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + key));
-  $$('#rail [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === key));
-  $('#moreBtn').classList.toggle('active', !!$(`#rail [data-tab="${key}"].in-more`));
+  $$('#rail [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === rk));
+  $('#moreBtn').classList.toggle('active', !!$(`#rail [data-tab="${rk}"].in-more`));
   subscribe();
   if (key === 'map') { KnoxMap.redraw(); if (fogWanted) fogPoll(); }
   if (key === 'comms') { updateCommsBadge(); if (Comms.modeNow() === 'chat') Comms.scrollChat(); }

@@ -2073,13 +2073,14 @@ const Recap = {
   /** The words and numbers of the card, for the sheet and the picture. */
   facts(r) {
     const hours = Number(r.hours) || 0, kills = Number(r.kills) || 0;
+    const dayN = Math.max(1, Math.floor(hours / 24) + 1);
     const from = this.date(r.start), to = this.date(r.died);
     return {
       name: String(r.name || ''),
       sub: (r.prof ? r.prof + ' · ' : '') + 'survived ' + this.lasted(hours),
       dates: from && to ? from + ' – ' + to : '',
       end: this.ending(r.cause),
-      nums: [[String(Math.max(1, Math.floor(hours / 24) + 1)), 'days'], [String(kills), kills === 1 ? 'kill' : 'kills'],
+      nums: [[String(dayN), dayN === 1 ? 'day' : 'days'], [String(kills), kills === 1 ? 'kill' : 'kills'],
         [!this.trail || this.trail.length < 4 ? '–' : Fmt.dist(this.walked(this.trail)), 'walked']],
       best: arr(r.best).filter((b) => b && b.n).map((b) => `${b.n} ${Number(b.l) || 0}`).join(' · '),
       moments: arr(r.moments).filter((m) => m && m.s).map((m) => `Day ${Number(m.d) || 1}  ·  ${m.s}`),

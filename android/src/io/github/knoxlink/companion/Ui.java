@@ -68,15 +68,18 @@ final class Ui {
      */
     static TextView[] cardHead(Context c, Theme t, LinearLayout card, String title) {
         if (t.pz) {
-            android.widget.FrameLayout bar = new android.widget.FrameLayout(c);
+            // the title centred in what the note on the right (health, a count...) leaves free, so they never overlap
+            LinearLayout bar = row(c);
             bar.setBackground(t.titleBar());
             TextView l = text(c, t, title, 12.5f, 0xFFFFFFFF, true);
             l.setGravity(Gravity.CENTER);
-            bar.addView(l, new android.widget.FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+            ellipsize(l);
+            bar.addView(l, new LinearLayout.LayoutParams(0, -2, 1));
             TextView sub = text(c, t, "", 12, t.text3, true);
-            bar.addView(sub, new android.widget.FrameLayout.LayoutParams(-2, -2, Gravity.END | Gravity.CENTER_VERTICAL));
+            bar.addView(sub, new LinearLayout.LayoutParams(-2, -2));
             bar.setPadding(t.dp(8), 0, t.dp(8), 0);
-            // across the whole panel, just inside its border
+            // across the whole panel, just inside its border: drawn over the panel's padding, so that mustn't clip
+            card.setClipToPadding(false);
             int in = t.dp(1);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, t.dp(22));
             lp.setMargins(-card.getPaddingLeft() + in, -card.getPaddingTop() + in, -card.getPaddingRight() + in, t.dp(10));
@@ -114,7 +117,8 @@ final class Ui {
                 b.setOnClickListener(back);
                 bar.addView(b, new android.widget.FrameLayout.LayoutParams(t.dp(44), -1, Gravity.START));
             }
-            // across the whole sheet: its sides are 18 dp in (MainActivity.openSheet)
+            // across the whole sheet: its sides are 18 dp in (MainActivity.openSheet), drawn over that padding
+            sheet.setClipToPadding(false);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, t.dp(30));
             lp.setMargins(-t.dp(18) + t.dp(1), t.dp(1), -t.dp(18) + t.dp(1), t.dp(12));
             sheet.addView(bar, lp);

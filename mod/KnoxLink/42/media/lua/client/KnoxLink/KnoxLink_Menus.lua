@@ -255,7 +255,8 @@ function KL.nearbyObjects(player)
                     -- floors and items lying on the floor are covered elsewhere
                     if not try(o, "isFloor", false) and not instanceof(o, "IsoWorldInventoryObject") then
                         local n = objectName(o)
-                        if n and not seen[n] then
+                        -- grass grows on every square outdoors: a row for each would bury the rest
+                        if n and n ~= "Grass" and not seen[n] then
                             seen[n] = true
                             table.insert(names, n)
                             first = first or i

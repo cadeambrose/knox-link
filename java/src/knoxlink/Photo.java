@@ -19,16 +19,22 @@ import zombie.core.textures.TextureDraw;
  * windows and bars, taken when a screen asks (with a camera, in immersion: KnoxLink_Photo.lua),
  * kept as a JPEG in the save (knoxlink/photos/<id>.jpg) and shown on that day's journal page.
  *
- * Main thread: take() books the next frame; frame(), called before the game draws its UI
- * (OnPreUIDraw, when the world is on the screen and the UI not yet), queues the read on the
- * render thread; the JPEG is made and written on a thread of its own.
+ * Main thread: take() books a photo while KnoxLink_Photo.lua hides the game's UI (its own
+ * "toggle UI", like a shutter); frame(), called before the game's UI pass (OnPreUIDraw), queues
+ * the read on the render thread once the UI has been gone for a few frames and 0.3 s, and the Lua
+ * puts the UI back. The wait is for the game's UI buffer: it's drawn at its own pace and laid
+ * over the world at the end of a frame, and with Project Viewpoint's 3D view the screen at this
+ * point still holds the last finished frame. The JPEG is made and written on a thread of its own.
  */
 final class Photo {
     private static final int MAX_W = 1600;     // wider screens are halved
     private static final int QUALITY = 88;
+    private static final int WAIT_FRAMES = 4, WAIT_MS = 300;
 
     private static volatile String pending;
     private static volatile boolean broken;
+    private static int frames;
+    private static long bookedAt;
     private static final Drawer[] drawers = {new Drawer(), new Drawer(), new Drawer()};
     private static final Map<String, byte[]> cache = new LinkedHashMap<String, byte[]>(16, 0.75f, true) {
         @Override
@@ -43,19 +49,26 @@ final class Photo {
         return id != null && id.matches("[A-Za-z0-9_-]{1,80}");
     }
 
-    /** Books a photo for the next frame; null, or why it can't be taken. */
+    /** Books a photo; null, or why it can't be taken. */
     static String take(String id) {
         if (broken) return "Photos don't work with this game's graphics";
         if (!validId(id)) return "Bad photo id";
         if (pending != null) return "Still taking the last one";
+        frames = 0;
+        bookedAt = System.currentTimeMillis();
         pending = id;
         return null;
     }
 
-    /** Main thread, before the game's UI is drawn: queues the read of the screen. */
-    static void frame() {
+    /** Main thread, before the game's UI pass: once it's time, queues the read of the screen; true when it did (or gave up). */
+    static boolean frame() {
         String id = pending;
-        if (id == null || broken) return;
+        if (id == null) return false;
+        if (broken) {
+            pending = null;
+            return true;
+        }
+        if (++frames < WAIT_FRAMES || System.currentTimeMillis() - bookedAt < WAIT_MS) return false;
         pending = null;
         try {
             Drawer d = drawers[SpriteRenderer.instance.getMainStateIndex()];
@@ -64,6 +77,7 @@ final class Photo {
         } catch (Throwable t) {
             fail("photo (queue)", t);
         }
+        return true;
     }
 
     private static void fail(String what, Throwable t) {
